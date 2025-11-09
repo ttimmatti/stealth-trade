@@ -25,6 +25,7 @@ anchor-spl = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true, features = ["anchor"] }
 magicblock-permission-client = { workspace = true }
 session-keys = { workspace = true, features = ["no-entrypoint"] }
+constant-product-curve = { git = "https://github.com/deanmlittle/constant-product-curve.git" }
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
