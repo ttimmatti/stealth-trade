@@ -20,4 +20,6 @@ pub enum ErrorCode {
     NoLiquidityInPool,
     #[msg("Insufficient Pool Balance")]
     InsufficientPoolBalance,
+    #[msg("Pool Not Active")]
+    PoolNotActive,
 }

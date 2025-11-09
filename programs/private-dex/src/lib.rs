@@ -60,6 +60,16 @@ pub mod private_dex {
         ctx.accounts.remove_liquidity(amount, min_x, min_y)
     }
 
+    /// Transfers virtual tokens from one user to another
+    pub fn transfer(ctx: Context<Transfer>, amount: u64) -> Result<()> {
+        ctx.accounts.transfer(amount)
+    }
+
+    /// Swaps virtual tokens in lp
+    pub fn swap(ctx: Context<Swap>, is_x: bool, amount: u64, min: u64) -> Result<()> {
+        ctx.accounts.swap(is_x, amount, min)
+    }
+
     // /// Initializes a deposit account for a user and token mint if it does not exist.
     // ///
     // /// Sets up a new deposit account with zero balance for the user and token mint.
