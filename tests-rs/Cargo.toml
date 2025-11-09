@@ -1,0 +1,25 @@
+[package]
+name = "private-dex-tests"
+version = "0.1.0"
+edition = "2021"
+
+[[test]]
+name = "private-dex-tests"
+path = "private-dex-tests.rs"
+
+[[test]]
+name = "example-tests"
+path = "example-tests.rs"
+
+[dependencies]
+private_dex = { path = "../programs/private-dex", features = ["no-entrypoint"] }
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+solana-program = { workspace = true }
+solana-sdk = "2.2.1"
+litesvm = "0.6.1"
+litesvm-token = "0.6.1"
+spl-associated-token-account = "7.0.0"
+spl-token = "7.0.0"
+borsh = "1.5.1"
+

@@ -1,0 +1,1061 @@
+use private_dex::{instruction, state::LiquidityPoolStatus};
+use anchor_lang::{AnchorDeserialize, InstructionData, ToAccountMetas, system_program};
+use litesvm::LiteSVM;
+use solana_sdk::{
+    instruction::Instruction, 
+    pubkey::Pubkey, 
+    signature::{read_keypair_file, Keypair, Signer}, 
+    transaction::Transaction
+};
+use litesvm_token::{
+    spl_token::native_mint::DECIMALS,
+    CreateAssociatedTokenAccount, CreateMint, MintTo,
+};
+use spl_associated_token_account::get_associated_token_address;
+
+// Constants from the program
+const CONFIG_SEED: &[u8] = b"config";
+const USER_SEED: &[u8] = b"user";
+const LIQUIDITY_POOL_SEED: &[u8] = b"liquidity_pool";
+const LP_MINT_SEED: &[u8] = b"lp_mint";
+const LP_DECIMALS: u8 = 6;
+
+// ============================================================================
+// Helper Functions for Instructions
+// ============================================================================
+
+struct TestContext {
+    svm: LiteSVM,
+    program_id: Pubkey,
+    admin: Keypair,
+    config: Pubkey,
+}
+
+impl TestContext {
+    fn new() -> Self {
+        let mut svm = LiteSVM::new();
+        
+        let program_keypair = read_keypair_file("../target/deploy/private_dex-keypair.json").unwrap();
+        let program_id = program_keypair.pubkey();
+        let program_bytes = include_bytes!("../target/deploy/private_dex.so");
+        
+        svm.add_program(program_id, program_bytes);
+        
+        // Admin is the program ID itself according to constants
+        let admin = read_keypair_file("../../../../.config/solana/id.json").unwrap();
+        svm.airdrop(&admin.pubkey(), 100_000_000_000).unwrap(); // 100 SOL
+
+        let balance = svm.get_balance(&admin.pubkey()).unwrap();
+        println!("Balance: {:?}", balance);
+        
+        let (config, _) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
+        
+        TestContext {
+            svm,
+            program_id,
+            admin,
+            config,
+        }
+    }
+}
+
+/// Helper: Initialize the config
+fn initialize_config(ctx: &mut TestContext) -> Result<(), Box<dyn std::error::Error>> {
+    let accounts = private_dex::accounts::Initialize {
+        sender: ctx.admin.pubkey(),
+        config: ctx.config,
+        system_program: system_program::ID,
+    };
+    
+    let data = instruction::Initialize {};
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&ctx.admin.pubkey()),
+        &[&ctx.admin],
+        ctx.svm.latest_blockhash(),
+    );
+    
+    ctx.svm.send_transaction(tx).expect("Failed to send transaction");
+    Ok(())
+}
+
+/// Helper: Update config
+fn update_config(
+    ctx: &mut TestContext,
+    is_paused: Option<bool>,
+    default_pool_fee_bps: Option<u16>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let accounts = private_dex::accounts::UpdateConfig {
+        sender: ctx.admin.pubkey(),
+        config: ctx.config,
+        system_program: system_program::ID,
+    };
+    
+    let data = instruction::UpdateConfig {
+        is_paused,
+        default_pool_fee_bps,
+    };
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&ctx.admin.pubkey()),
+        &[&ctx.admin],
+        ctx.svm.latest_blockhash(),
+    );
+    
+    ctx.svm.send_transaction(tx).expect("Failed to send transaction");
+    Ok(())
+}
+
+/// Helper: Create user
+fn create_user(
+    ctx: &mut TestContext,
+    user_keypair: &Keypair,
+) -> Result<Pubkey, Box<dyn std::error::Error>> {
+    let (user_pda, _) = Pubkey::find_program_address(
+        &[USER_SEED, user_keypair.pubkey().as_ref()],
+        &ctx.program_id,
+    );
+    
+    let accounts = private_dex::accounts::CreateUser {
+        sender: user_keypair.pubkey(),
+        user: user_pda,
+        config: ctx.config,
+        system_program: system_program::ID,
+    };
+    
+    let data = instruction::CreateUser {};
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&user_keypair.pubkey()),
+        &[user_keypair],
+        ctx.svm.latest_blockhash(),
+    );
+    
+    ctx.svm.send_transaction(tx).expect("Failed to send transaction");
+    Ok(user_pda)
+}
+
+/// Helper: Deposit tokens
+fn deposit(
+    ctx: &mut TestContext,
+    user_keypair: &Keypair,
+    user_pda: Pubkey,
+    mint: Pubkey,
+    amount: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sender_ata = get_associated_token_address(&user_keypair.pubkey(), &mint);
+    let vault = get_associated_token_address(&ctx.config, &mint);
+    
+    let accounts = private_dex::accounts::Deposit {
+        sender: user_keypair.pubkey(),
+        user: user_pda,
+        config: ctx.config,
+        sender_ata,
+        vault,
+        mint,
+        associated_token_program: anchor_spl::associated_token::ID,
+        token_program: anchor_spl::token::ID,
+        system_program: system_program::ID,
+    };
+    
+    let data = instruction::Deposit { amount };
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&user_keypair.pubkey()),
+        &[user_keypair],
+        ctx.svm.latest_blockhash(),
+    );
+    
+    ctx.svm.send_transaction(tx).expect("Failed to send transaction");
+    Ok(())
+}
+
+/// Helper: Withdraw tokens
+fn withdraw(
+    ctx: &mut TestContext,
+    user_keypair: &Keypair,
+    user_pda: Pubkey,
+    mint: Pubkey,
+    amount: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sender_ata = get_associated_token_address(&user_keypair.pubkey(), &mint);
+    let vault = get_associated_token_address(&ctx.config, &mint);
+    
+    let accounts = private_dex::accounts::Withdraw {
+        sender: user_keypair.pubkey(),
+        user: user_pda,
+        config: ctx.config,
+        sender_ata,
+        vault,
+        mint,
+        associated_token_program: anchor_spl::associated_token::ID,
+        token_program: anchor_spl::token::ID,
+        system_program: system_program::ID,
+    };
+    
+    let data = instruction::Withdraw { amount };
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&user_keypair.pubkey()),
+        &[user_keypair],
+        ctx.svm.latest_blockhash(),
+    );
+    
+    ctx.svm.send_transaction(tx).expect("Failed to send transaction");
+    Ok(())
+}
+
+/// Helper: Create liquidity pool
+fn create_lp(
+    ctx: &mut TestContext,
+    creator: &Keypair,
+    mint_a: Pubkey,
+    mint_b: Pubkey,
+) -> Result<(Pubkey, Pubkey), Box<dyn std::error::Error>> {
+    let (lp, _) = Pubkey::find_program_address(
+        &[LIQUIDITY_POOL_SEED, mint_a.as_ref(), mint_b.as_ref()],
+        &ctx.program_id,
+    );
+    
+    let (mint_lp, _) = Pubkey::find_program_address(
+        &[LP_MINT_SEED, lp.as_ref()],
+        &ctx.program_id,
+    );
+    
+    let vault_a = get_associated_token_address(&ctx.config, &mint_a);
+    let vault_b = get_associated_token_address(&ctx.config, &mint_b);
+    let vault_lp = get_associated_token_address(&ctx.config, &mint_lp);
+    
+    let accounts = private_dex::accounts::CreateLp {
+        sender: creator.pubkey(),
+        lp,
+        config: ctx.config,
+        mint_a,
+        mint_b,
+        mint_lp,
+        vault_a,
+        vault_b,
+        vault_lp,
+        associated_token_program: anchor_spl::associated_token::ID,
+        token_program: anchor_spl::token::ID,
+        system_program: system_program::ID,
+    };
+    
+    let data = instruction::CreateLp {};
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&creator.pubkey()),
+        &[creator],
+        ctx.svm.latest_blockhash(),
+    );
+    
+    ctx.svm.send_transaction(tx).expect("Failed to send transaction");
+    Ok((lp, mint_lp))
+}
+
+/// Helper: Add liquidity
+fn add_liquidity(
+    ctx: &mut TestContext,
+    user_keypair: &Keypair,
+    user_pda: Pubkey,
+    mint_a: Pubkey,
+    mint_b: Pubkey,
+    lp: Pubkey,
+    mint_lp: Pubkey,
+    amount: u64,
+    max_x: u64,
+    max_y: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let accounts = private_dex::accounts::AddLiquidity {
+        sender: user_keypair.pubkey(),
+        user: user_pda,
+        lp,
+        config: ctx.config,
+        mint_a,
+        mint_b,
+        mint_lp,
+        associated_token_program: anchor_spl::associated_token::ID,
+        token_program: anchor_spl::token::ID,
+        system_program: system_program::ID,
+    };
+    
+    let data = instruction::AddLiquidity {
+        amount,
+        max_x,
+        max_y,
+    };
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&user_keypair.pubkey()),
+        &[user_keypair],
+        ctx.svm.latest_blockhash(),
+    );
+    
+    ctx.svm.send_transaction(tx).expect("Failed to send transaction");
+    Ok(())
+}
+
+/// Helper: Remove liquidity
+fn remove_liquidity(
+    ctx: &mut TestContext,
+    user_keypair: &Keypair,
+    user_pda: Pubkey,
+    mint_a: Pubkey,
+    mint_b: Pubkey,
+    lp: Pubkey,
+    mint_lp: Pubkey,
+    amount: u64,
+    min_x: u64,
+    min_y: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let accounts = private_dex::accounts::RemoveLiquidity {
+        sender: user_keypair.pubkey(),
+        user: user_pda,
+        lp,
+        config: ctx.config,
+        mint_a,
+        mint_b,
+        mint_lp,
+        associated_token_program: anchor_spl::associated_token::ID,
+        token_program: anchor_spl::token::ID,
+        system_program: system_program::ID,
+    };
+    
+    let data = instruction::RemoveLiquidity {
+        amount,
+        min_x,
+        min_y,
+    };
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&user_keypair.pubkey()),
+        &[user_keypair],
+        ctx.svm.latest_blockhash(),
+    );
+    
+    ctx.svm.send_transaction(tx).expect("Failed to send transaction");
+    Ok(())
+}
+
+/// Helper: Swap tokens
+fn swap(
+    ctx: &mut TestContext,
+    user_keypair: &Keypair,
+    user_pda: Pubkey,
+    mint_a: Pubkey,
+    mint_b: Pubkey,
+    lp: Pubkey,
+    mint_lp: Pubkey,
+    is_x: bool,
+    amount: u64,
+    min: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let accounts = private_dex::accounts::Swap {
+        sender: user_keypair.pubkey(),
+        user: user_pda,
+        lp,
+        config: ctx.config,
+        mint_a,
+        mint_b,
+        associated_token_program: anchor_spl::associated_token::ID,
+        token_program: anchor_spl::token::ID,
+        system_program: system_program::ID,
+    };
+    
+    let data = instruction::Swap { is_x, amount, min };
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&user_keypair.pubkey()),
+        &[user_keypair],
+        ctx.svm.latest_blockhash(),
+    );
+    
+    ctx.svm.send_transaction(tx).expect("Failed to send transaction");
+    Ok(())
+}
+
+/// Helper: Transfer tokens between users
+fn transfer(
+    ctx: &mut TestContext,
+    sender_keypair: &Keypair,
+    sender_pda: Pubkey,
+    destination_pda: Pubkey,
+    mint: Pubkey,
+    amount: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let accounts = private_dex::accounts::Transfer {
+        sender: sender_keypair.pubkey(),
+        user: sender_pda,
+        config: ctx.config,
+        destination_user: destination_pda,
+        mint,
+        associated_token_program: anchor_spl::associated_token::ID,
+        token_program: anchor_spl::token::ID,
+        system_program: system_program::ID,
+    };
+    
+    let data = instruction::Transfer { amount };
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&sender_keypair.pubkey()),
+        &[sender_keypair],
+        ctx.svm.latest_blockhash(),
+    );
+    
+    ctx.svm.send_transaction(tx).expect("Failed to send transaction");
+    Ok(())
+}
+
+// ============================================================================
+// Test Cases
+// ============================================================================
+
+#[test]
+fn test_initialize() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Verify the config was created correctly
+    let config_account = ctx.svm.get_account(&ctx.config).unwrap();
+    assert!(config_account.lamports > 0, "Config account should have lamports");
+    
+    // Deserialize and check the config data
+    let config_data = &config_account.data[8..]; // Skip discriminator
+    assert!(!config_data.is_empty(), "Config should have data");
+    
+    println!("✅ Config initialized successfully");
+}
+
+#[test]
+fn test_update_config() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Update config to pause the protocol
+    update_config(&mut ctx, Some(true), None).unwrap();
+    
+    println!("✅ Config updated successfully");
+    
+    // Update config to unpause and change fee
+    update_config(&mut ctx, Some(false), Some(200)).unwrap();
+    
+    println!("✅ Config updated again successfully");
+}
+
+#[test]
+fn test_create_user() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Create a user
+    let user = Keypair::new();
+    ctx.svm.airdrop(&user.pubkey(), 10_000_000_000).unwrap();
+    
+    let user_pda = create_user(&mut ctx, &user).unwrap();
+    
+    // Verify the user account was created
+    let user_account = ctx.svm.get_account(&user_pda).unwrap();
+    assert!(user_account.lamports > 0, "User account should have lamports");
+    
+    println!("✅ User created successfully at {}", user_pda);
+}
+
+#[test]
+fn test_deposit_tokens() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Create a user
+    let user = Keypair::new();
+    ctx.svm.airdrop(&user.pubkey(), 10_000_000_000).unwrap();
+    let user_pda = create_user(&mut ctx, &user).unwrap();
+    
+    // Create a token mint and mint tokens to the user
+    let mint = CreateMint::new(&mut ctx.svm, &user)
+        .authority(&user.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    let user_ata = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user, &mint)
+        .owner(&user.pubkey())
+        .send()
+        .unwrap();
+    
+    MintTo::new(&mut ctx.svm, &user, &mint, &user_ata, 1_000_000)
+        .send()
+        .unwrap();
+    
+    // Deposit tokens
+    deposit(&mut ctx, &user, user_pda, mint, 500_000).unwrap();
+    
+    println!("✅ Tokens deposited successfully");
+}
+
+#[test]
+fn test_deposit_and_withdraw() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Create a user
+    let user = Keypair::new();
+    ctx.svm.airdrop(&user.pubkey(), 10_000_000_000).unwrap();
+    let user_pda = create_user(&mut ctx, &user).unwrap();
+    
+    // Create a token mint and mint tokens to the user
+    let mint = CreateMint::new(&mut ctx.svm, &user)
+        .authority(&user.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    let user_ata = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user, &mint)
+        .owner(&user.pubkey())
+        .send()
+        .unwrap();
+    
+    MintTo::new(&mut ctx.svm, &user, &mint, &user_ata, 1_000_000)
+        .send()
+        .unwrap();
+    
+    // Deposit tokens
+    deposit(&mut ctx, &user, user_pda, mint, 500_000).unwrap();
+    println!("✅ Tokens deposited");
+    
+    // Withdraw tokens
+    withdraw(&mut ctx, &user, user_pda, mint, 200_000).unwrap();
+    println!("✅ Tokens withdrawn successfully");
+}
+
+#[test]
+fn test_create_liquidity_pool() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Create a user to create the pool
+    let creator = Keypair::new();
+    ctx.svm.airdrop(&creator.pubkey(), 10_000_000_000).unwrap();
+    
+    // Create two token mints
+    let mint_a = CreateMint::new(&mut ctx.svm, &creator)
+        .authority(&creator.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    let mint_b = CreateMint::new(&mut ctx.svm, &creator)
+        .authority(&creator.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    // Create liquidity pool
+    let (lp, mint_lp) = create_lp(&mut ctx, &creator, mint_a, mint_b).unwrap();
+    
+    // Verify the pool was created
+    let lp_account = ctx.svm.get_account(&lp).unwrap();
+    assert!(lp_account.lamports > 0, "LP account should have lamports");
+    
+    println!("✅ Liquidity pool created at {}", lp);
+    println!("✅ LP token mint created at {}", mint_lp);
+}
+
+#[test]
+fn test_add_liquidity() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Create a user
+    let user = Keypair::new();
+    ctx.svm.airdrop(&user.pubkey(), 10_000_000_000).unwrap();
+    let user_pda = create_user(&mut ctx, &user).unwrap();
+    
+    // Create two token mints
+    let mint_a = CreateMint::new(&mut ctx.svm, &user)
+        .authority(&user.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    let mint_b = CreateMint::new(&mut ctx.svm, &user)
+        .authority(&user.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    // Mint tokens to user and deposit
+    let user_ata_a = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user, &mint_a)
+        .owner(&user.pubkey())
+        .send()
+        .unwrap();
+    let user_ata_b = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user, &mint_b)
+        .owner(&user.pubkey())
+        .send()
+        .unwrap();
+    
+    MintTo::new(&mut ctx.svm, &user, &mint_a, &user_ata_a, 10_000_000)
+        .send()
+        .unwrap();
+    MintTo::new(&mut ctx.svm, &user, &mint_b, &user_ata_b, 10_000_000)
+        .send()
+        .unwrap();
+    
+    // Deposit tokens into the protocol
+    deposit(&mut ctx, &user, user_pda, mint_a, 5_000_000).unwrap();
+    deposit(&mut ctx, &user, user_pda, mint_b, 5_000_000).unwrap();
+    println!("✅ Tokens deposited");
+    
+    // Create liquidity pool
+    let (lp, mint_lp) = create_lp(&mut ctx, &user, mint_a, mint_b).unwrap();
+    println!("✅ LP created");
+    
+    // Add liquidity (first deposit, so we can set any ratio)
+    add_liquidity(
+        &mut ctx,
+        &user,
+        user_pda,
+        mint_a,
+        mint_b,
+        lp,
+        mint_lp,
+        1_000_000, // LP tokens to mint
+        2_000_000, // max token A
+        2_000_000, // max token B
+    )
+    .unwrap();
+    
+    println!("✅ Liquidity added successfully");
+}
+
+#[test]
+fn test_add_and_remove_liquidity() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Create a user
+    let user = Keypair::new();
+    ctx.svm.airdrop(&user.pubkey(), 10_000_000_000).unwrap();
+    let user_pda = create_user(&mut ctx, &user).unwrap();
+    
+    // Create two token mints
+    let mint_a = CreateMint::new(&mut ctx.svm, &user)
+        .authority(&user.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    let mint_b = CreateMint::new(&mut ctx.svm, &user)
+        .authority(&user.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    // Mint and deposit tokens
+    let user_ata_a = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user, &mint_a)
+        .owner(&user.pubkey())
+        .send()
+        .unwrap();
+    let user_ata_b = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user, &mint_b)
+        .owner(&user.pubkey())
+        .send()
+        .unwrap();
+    
+    MintTo::new(&mut ctx.svm, &user, &mint_a, &user_ata_a, 10_000_000)
+        .send()
+        .unwrap();
+    MintTo::new(&mut ctx.svm, &user, &mint_b, &user_ata_b, 10_000_000)
+        .send()
+        .unwrap();
+    
+    deposit(&mut ctx, &user, user_pda, mint_a, 5_000_000).unwrap();
+    deposit(&mut ctx, &user, user_pda, mint_b, 5_000_000).unwrap();
+    
+    // Create liquidity pool
+    let (lp, mint_lp) = create_lp(&mut ctx, &user, mint_a, mint_b).unwrap();
+    
+    // Add liquidity
+    add_liquidity(
+        &mut ctx,
+        &user,
+        user_pda,
+        mint_a,
+        mint_b,
+        lp,
+        mint_lp,
+        1_000_000,
+        2_000_000,
+        2_000_000,
+    )
+    .unwrap();
+    println!("✅ Liquidity added");
+    
+    // Remove liquidity
+    remove_liquidity(
+        &mut ctx,
+        &user,
+        user_pda,
+        mint_a,
+        mint_b,
+        lp,
+        mint_lp,
+        500_000, // LP tokens to burn
+        0,       // min token A
+        0,       // min token B
+    )
+    .unwrap();
+    
+    println!("✅ Liquidity removed successfully");
+}
+
+#[test]
+fn test_swap() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Create a user
+    let user = Keypair::new();
+    ctx.svm.airdrop(&user.pubkey(), 10_000_000_000).unwrap();
+    let user_pda = create_user(&mut ctx, &user).unwrap();
+    
+    // Create two token mints
+    let mint_a = CreateMint::new(&mut ctx.svm, &user)
+        .authority(&user.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    let mint_b = CreateMint::new(&mut ctx.svm, &user)
+        .authority(&user.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    // Mint and deposit tokens
+    let user_ata_a = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user, &mint_a)
+        .owner(&user.pubkey())
+        .send()
+        .unwrap();
+    let user_ata_b = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user, &mint_b)
+        .owner(&user.pubkey())
+        .send()
+        .unwrap();
+    
+    MintTo::new(&mut ctx.svm, &user, &mint_a, &user_ata_a, 10_000_000)
+        .send()
+        .unwrap();
+    MintTo::new(&mut ctx.svm, &user, &mint_b, &user_ata_b, 10_000_000)
+        .send()
+        .unwrap();
+    
+    deposit(&mut ctx, &user, user_pda, mint_a, 8_000_000).unwrap();
+    deposit(&mut ctx, &user, user_pda, mint_b, 8_000_000).unwrap();
+    
+    // Create liquidity pool and add liquidity
+    let (lp, mint_lp) = create_lp(&mut ctx, &user, mint_a, mint_b).unwrap();
+    
+    add_liquidity(
+        &mut ctx,
+        &user,
+        user_pda,
+        mint_a,
+        mint_b,
+        lp,
+        mint_lp,
+        1_000_000,
+        5_000_000,
+        5_000_000,
+    )
+    .unwrap();
+    println!("✅ Liquidity added");
+
+    let lp_data = ctx.svm.get_account(&lp).unwrap();
+    let lp_state = private_dex::state::LiquidityPool::try_from_slice(&lp_data.data.as_slice()[8..]).unwrap();
+
+    assert_eq!(lp_state.lp_supply, 1_000_000);
+    assert_eq!(lp_state.virtual_reserve_a, 5_000_000);
+    assert_eq!(lp_state.virtual_reserve_b, 5_000_000);
+    assert_eq!(lp_state.status, LiquidityPoolStatus::Active);
+    
+    // Try to swap
+    let _ = swap(
+        &mut ctx,
+        &user,
+        user_pda,
+        mint_a,
+        mint_b,
+        lp,
+        mint_lp,
+        true,   // swap X for Y
+        100_000, // amount
+        0,      // min output
+    );
+
+    let lp_data_after = ctx.svm.get_account(&lp).unwrap();
+    let lp_state_after = private_dex::state::LiquidityPool::try_from_slice(&lp_data_after.data.as_slice()[8..]).unwrap();
+
+    println!("LP state after: {:?}", lp_state_after);
+
+    assert_eq!(lp_state_after.virtual_reserve_a, 5_100_000);
+    assert!(lp_state_after.virtual_reserve_b - 4_900_000 < 5000);  // difference is commission and CP delta
+    
+    println!("✅ Swap successful");
+}
+
+#[test]
+fn test_transfer_between_users() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Create two users
+    let user1 = Keypair::new();
+    let user2 = Keypair::new();
+    ctx.svm.airdrop(&user1.pubkey(), 10_000_000_000).unwrap();
+    ctx.svm.airdrop(&user2.pubkey(), 10_000_000_000).unwrap();
+    
+    let user1_pda = create_user(&mut ctx, &user1).unwrap();
+    let user2_pda = create_user(&mut ctx, &user2).unwrap();
+    
+    // Create a token mint
+    let mint = CreateMint::new(&mut ctx.svm, &user1)
+        .authority(&user1.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    // Mint tokens to user1 and deposit
+    let user1_ata = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user1, &mint)
+        .owner(&user1.pubkey())
+        .send()
+        .unwrap();
+    
+    MintTo::new(&mut ctx.svm, &user1, &mint, &user1_ata, 1_000_000)
+        .send()
+        .unwrap();
+    
+    deposit(&mut ctx, &user1, user1_pda, mint, 500_000).unwrap();
+    println!("✅ User1 deposited tokens");
+    
+    // Transfer from user1 to user2
+    transfer(&mut ctx, &user1, user1_pda, user2_pda, mint, 200_000).unwrap();
+    
+    println!("✅ Transfer successful from user1 to user2");
+}
+
+#[test]
+fn test_full_flow() {
+    let mut ctx = TestContext::new();
+    
+    println!("=== Full Flow Test ===");
+    
+    // 1. Initialize
+    initialize_config(&mut ctx).unwrap();
+    println!("✅ 1. Config initialized");
+    
+    // 2. Create users
+    let user1 = Keypair::new();
+    let user2 = Keypair::new();
+    ctx.svm.airdrop(&user1.pubkey(), 10_000_000_000).unwrap();
+    ctx.svm.airdrop(&user2.pubkey(), 10_000_000_000).unwrap();
+    
+    let user1_pda = create_user(&mut ctx, &user1).unwrap();
+    let user2_pda = create_user(&mut ctx, &user2).unwrap();
+    println!("✅ 2. Users created");
+    
+    // 3. Create tokens
+    let mint_a = CreateMint::new(&mut ctx.svm, &user1)
+        .authority(&user1.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    let mint_b = CreateMint::new(&mut ctx.svm, &user1)
+        .authority(&user1.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    println!("✅ 3. Token mints created");
+    
+    // 4. Mint tokens to users
+    let user1_ata_a = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user1, &mint_a)
+        .owner(&user1.pubkey())
+        .send()
+        .unwrap();
+    let user1_ata_b = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user1, &mint_b)
+        .owner(&user1.pubkey())
+        .send()
+        .unwrap();
+    
+    MintTo::new(&mut ctx.svm, &user1, &mint_a, &user1_ata_a, 10_000_000)
+        .send()
+        .unwrap();
+    MintTo::new(&mut ctx.svm, &user1, &mint_b, &user1_ata_b, 10_000_000)
+        .send()
+        .unwrap();
+    println!("✅ 4. Tokens minted");
+    
+    // 5. Deposit tokens
+    deposit(&mut ctx, &user1, user1_pda, mint_a, 5_000_000).unwrap();
+    deposit(&mut ctx, &user1, user1_pda, mint_b, 5_000_000).unwrap();
+    println!("✅ 5. Tokens deposited");
+    
+    // 6. Create LP
+    let (lp, mint_lp) = create_lp(&mut ctx, &user1, mint_a, mint_b).unwrap();
+    println!("✅ 6. Liquidity pool created");
+    
+    // 7. Add liquidity
+    add_liquidity(
+        &mut ctx,
+        &user1,
+        user1_pda,
+        mint_a,
+        mint_b,
+        lp,
+        mint_lp,
+        1_000_000,
+        3_000_000,
+        3_000_000,
+    )
+    .unwrap();
+    println!("✅ 7. Liquidity added");
+    
+    // 8. Transfer some tokens to user2
+    transfer(&mut ctx, &user1, user1_pda, user2_pda, mint_a, 500_000).unwrap();
+    println!("✅ 8. Tokens transferred to user2");
+    
+    // 9. Withdraw some tokens
+    withdraw(&mut ctx, &user1, user1_pda, mint_b, 500_000).unwrap();
+    println!("✅ 9. Tokens withdrawn");
+    
+    println!("\n🎉 Full flow completed successfully!");
+}
+
+#[test]
+fn test_multiple_deposits_same_mint() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Create a user
+    let user = Keypair::new();
+    ctx.svm.airdrop(&user.pubkey(), 10_000_000_000).unwrap();
+    let user_pda = create_user(&mut ctx, &user).unwrap();
+    
+    // Create a token mint
+    let mint = CreateMint::new(&mut ctx.svm, &user)
+        .authority(&user.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    let user_ata = CreateAssociatedTokenAccount::new(&mut ctx.svm, &user, &mint)
+        .owner(&user.pubkey())
+        .send()
+        .unwrap();
+    
+    MintTo::new(&mut ctx.svm, &user, &mint, &user_ata, 10_000_000)
+        .send()
+        .unwrap();
+    
+    // Multiple deposits to the same mint
+    deposit(&mut ctx, &user, user_pda, mint, 1_000_000).unwrap();
+    println!("✅ First deposit");
+    
+    deposit(&mut ctx, &user, user_pda, mint, 2_000_000).unwrap();
+    println!("✅ Second deposit");
+    
+    deposit(&mut ctx, &user, user_pda, mint, 1_500_000).unwrap();
+    println!("✅ Third deposit");
+    
+    println!("✅ Multiple deposits to same mint successful");
+}
