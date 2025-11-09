@@ -1,15 +1,16 @@
 use anchor_lang::prelude::*;
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, InitSpace, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, InitSpace, PartialEq, Eq, Debug)]
 pub enum LiquidityPoolStatus {
     Active,
     Paused,
 }
 
 #[account]
-#[derive(InitSpace)]
+#[derive(InitSpace, Debug)]
 pub struct LiquidityPool {
     pub bump: u8,
+    pub mint_lp_bump: u8,
     pub status: LiquidityPoolStatus,
     pub authority: Pubkey,
     pub mint_a: Pubkey,
