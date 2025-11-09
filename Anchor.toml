@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-private_dex = "3Qu3rYLyv2BCjkpBGufgnyjtHAvEzgKVR5AHMpgAaGqS"
+private_dex = "GVn2HeDBhMRKidC1ZhmoHWCU1ABsjLaCaPoarVXXhx9u"
 
 [programs.localnet]
-private_dex = "3Qu3rYLyv2BCjkpBGufgnyjtHAvEzgKVR5AHMpgAaGqS"
+private_dex = "GVn2HeDBhMRKidC1ZhmoHWCU1ABsjLaCaPoarVXXhx9u"
 
 [registry]
 url = "https://api.apr.dev"

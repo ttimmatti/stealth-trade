@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 pub const MAX_POSITIONS: usize = 10;
 
-pub const ADMIN: Pubkey = Pubkey::from_str_const("3Qu3rYLyv2BCjkpBGufgnyjtHAvEzgKVR5AHMpgAaGqS");
+pub const ADMIN: Pubkey = Pubkey::from_str_const("2C4XmW1rq1yYQtWZ5JBMk7EdLfur8VzqCzPBywztt32L");
 
 pub const USER_SEED: &[u8] = b"user";
 pub const LIQUIDITY_POOL_SEED: &[u8] = b"liquidity_pool";

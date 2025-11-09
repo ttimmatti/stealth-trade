@@ -9,7 +9,7 @@ pub mod constants;
 
 use instructions::*;
 
-declare_id!("3Qu3rYLyv2BCjkpBGufgnyjtHAvEzgKVR5AHMpgAaGqS");
+declare_id!("GVn2HeDBhMRKidC1ZhmoHWCU1ABsjLaCaPoarVXXhx9u");
 
 #[ephemeral]
 #[program]
