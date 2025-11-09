@@ -24,11 +24,9 @@ pub struct Swap<'info> {
     pub user: Account<'info, User>,
 
     #[account(
-        init,
-        payer = sender,
-        space = LiquidityPool::DISCRIMINATOR.len() + LiquidityPool::INIT_SPACE,
+        mut,
         seeds = [LIQUIDITY_POOL_SEED, mint_a.key().as_ref(), mint_b.key().as_ref()],
-        bump
+        bump = lp.bump
     )]
     pub lp: Account<'info, LiquidityPool>,
 
@@ -40,15 +38,6 @@ pub struct Swap<'info> {
 
     pub mint_a: InterfaceAccount<'info, Mint>,
     pub mint_b: InterfaceAccount<'info, Mint>,
-    #[account(
-        init,
-        payer = sender,
-        seeds = [LP_MINT_SEED, lp.key().as_ref()],
-        bump,
-        mint::decimals = LP_DECIMALS,
-        mint::authority = config,
-    )]
-    pub mint_lp: InterfaceAccount<'info, Mint>,
 
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub token_program: Interface<'info, TokenInterface>,

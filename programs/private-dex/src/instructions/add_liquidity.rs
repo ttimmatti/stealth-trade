@@ -1,5 +1,5 @@
 use crate::errors::ErrorCode;
-use crate::state::{Config, LiquidityPool, User};
+use crate::state::{Config, LiquidityPool, LiquidityPoolStatus, User};
 use crate::constants::*;
 use crate::utils::get_position;
 use anchor_lang::prelude::*;
@@ -24,11 +24,9 @@ pub struct AddLiquidity<'info> {
     pub user: Account<'info, User>,
 
     #[account(
-        init,
-        payer = sender,
-        space = LiquidityPool::DISCRIMINATOR.len() + LiquidityPool::INIT_SPACE,
+        mut,
         seeds = [LIQUIDITY_POOL_SEED, mint_a.key().as_ref(), mint_b.key().as_ref()],
-        bump
+        bump = lp.bump
     )]
     pub lp: Account<'info, LiquidityPool>,
 
@@ -41,10 +39,9 @@ pub struct AddLiquidity<'info> {
     pub mint_a: InterfaceAccount<'info, Mint>,
     pub mint_b: InterfaceAccount<'info, Mint>,
     #[account(
-        init,
-        payer = sender,
+        mut,
         seeds = [LP_MINT_SEED, lp.key().as_ref()],
-        bump,
+        bump = lp.mint_lp_bump,
         mint::decimals = LP_DECIMALS,
         mint::authority = config,
     )]
@@ -58,6 +55,10 @@ pub struct AddLiquidity<'info> {
 impl<'info> AddLiquidity<'info> {
     pub fn add_liquidity(&mut self, amount: u64, max_x: u64, max_y: u64) -> Result<()> {
         require!(!self.config.paused, ErrorCode::Paused);
+
+        if self.lp.lp_supply == 0 && self.lp.virtual_reserve_a == 0 && self.lp.virtual_reserve_b == 0 {
+            self.lp.status = LiquidityPoolStatus::Active;
+        }
 
         let (x, y) = self.add_liquidity_amounts_xy(amount, max_x, max_y)?;
 
@@ -122,6 +123,9 @@ impl<'info> AddLiquidity<'info> {
 
         user_position.mint = self.mint_lp.key();
         user_position.amount += amount;
+
+        self.lp.lp_supply += amount;
+        require!(self.lp.lp_supply < LP_SUPPLY, ErrorCode::LiquidityPoolOverflow);
 
         Ok(())
     }

@@ -74,16 +74,17 @@ impl<'info> CreateLp<'info> {
     pub fn create_lp(&mut self, bumps: &CreateLpBumps) -> Result<()> {
         require!(!self.config.paused, ErrorCode::Paused);
 
-        self.initialize(bumps.lp)?;
+        self.initialize(bumps.lp, bumps.mint_lp)?;
 
         self.mint_lp_supply()?;
 
         Ok(())
     }
 
-    pub fn initialize(&mut self, bump: u8) -> Result<()> {
+    pub fn initialize(&mut self, bump: u8, mint_lp_bump: u8) -> Result<()> {
         self.lp.set_inner(LiquidityPool {
             bump,
+            mint_lp_bump,
             status: LiquidityPoolStatus::Paused,
             authority: self.sender.key(),
             mint_a: self.mint_a.key(),

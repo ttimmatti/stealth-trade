@@ -26,11 +26,9 @@ pub struct RemoveLiquidity<'info> {
     pub user: Account<'info, User>,
 
     #[account(
-        init,
-        payer = sender,
-        space = LiquidityPool::DISCRIMINATOR.len() + LiquidityPool::INIT_SPACE,
+        mut,
         seeds = [LIQUIDITY_POOL_SEED, mint_a.key().as_ref(), mint_b.key().as_ref()],
-        bump
+        bump = lp.bump
     )]
     pub lp: Account<'info, LiquidityPool>,
 
@@ -43,10 +41,9 @@ pub struct RemoveLiquidity<'info> {
     pub mint_a: InterfaceAccount<'info, Mint>,
     pub mint_b: InterfaceAccount<'info, Mint>,
     #[account(
-        init,
-        payer = sender,
+        mut,
         seeds = [LP_MINT_SEED, lp.key().as_ref()],
-        bump,
+        bump = lp.mint_lp_bump,
         mint::decimals = LP_DECIMALS,
         mint::authority = config,
     )]
@@ -122,6 +119,9 @@ impl<'info> RemoveLiquidity<'info> {
 
         user_position.mint = self.mint_lp.key();
         user_position.amount -= amount;
+
+        require!(self.lp.lp_supply >= amount, ErrorCode::InsufficientPoolBalance);
+        self.lp.lp_supply -= amount;
 
         Ok(())
     }
