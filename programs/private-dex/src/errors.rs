@@ -22,4 +22,6 @@ pub enum ErrorCode {
     InsufficientPoolBalance,
     #[msg("Pool Not Active")]
     PoolNotActive,
+    #[msg("Liquidity Pool Overflow")]
+    LiquidityPoolOverflow,
 }
