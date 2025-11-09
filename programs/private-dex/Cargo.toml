@@ -1,12 +1,12 @@
 [package]
-name = "private-payments"
+name = "private_dex"
 version = "0.1.0"
 description = "Created with Anchor"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "private_payments"
+name = "private_dex"
 
 [features]
 default = []
