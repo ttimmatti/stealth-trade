@@ -1,5 +1,6 @@
 use anchor_litesvm::{AnchorContext, AnchorLiteSVM};
-use private_dex::{instruction, state::{Config, LiquidityPool, LiquidityPoolStatus, User}};
+use anchor_spl::token_interface::TokenAccount;
+use private_dex::{constants::MAX_POSITIONS, instruction, state::{Config, LiquidityPool, LiquidityPoolStatus, User}};
 use anchor_lang::{AnchorDeserialize, InstructionData, ToAccountMetas, system_program};
 use litesvm::LiteSVM;
 use solana_sdk::{
@@ -487,6 +488,8 @@ fn test_initialize() {
     // Verify the config was created correctly
     let config_account = ctx.anchor_ctx.get_account::<Config>(&ctx.config).expect("Failed to get config account");
     assert!(config_account.admin.eq(&ctx.admin.pubkey()), "Config account should have admin");
+    assert!(!config_account.paused, "Config account should not be paused");
+    assert_eq!(config_account.default_pool_fee_bps, 100, "Config account should have default pool fee bps");
     
     println!("✅ Config initialized successfully");
 }
@@ -500,11 +503,18 @@ fn test_update_config() {
     
     // Update config to pause the protocol
     update_config(&mut ctx, Some(true), None).unwrap();
-    
+
+    let config_account = ctx.anchor_ctx.get_account::<Config>(&ctx.config).expect("Failed to get config account");
+    assert!(config_account.paused, "Config account should be paused");
+
     println!("✅ Config updated successfully");
     
     // Update config to unpause and change fee
     update_config(&mut ctx, Some(false), Some(200)).unwrap();
+
+    let config_account = ctx.anchor_ctx.get_account::<Config>(&ctx.config).expect("Failed to get config account");
+    assert!(!config_account.paused, "Config account should not be paused");
+    assert_eq!(config_account.default_pool_fee_bps, 200, "Config account should have default pool fee bps");
     
     println!("✅ Config updated again successfully");
 }
@@ -525,6 +535,9 @@ fn test_create_user() {
     // Verify the user account was created
     let user_account = ctx.anchor_ctx.get_account::<User>(&user_pda).expect("Failed to get user account");
     assert!(user_account.authority.eq(&user.pubkey()), "User account should have authority");
+    assert_eq!(user_account.positions.len(), MAX_POSITIONS, "User account should have MAX_POSITIONS positions");
+    assert_eq!(user_account.positions[0].mint, Pubkey::default(), "User account should have default position");
+    assert_eq!(user_account.positions[0].amount, 0, "User account should have default position amount");
     
     println!("✅ User created successfully at {}", user_pda);
 }
@@ -553,12 +566,60 @@ fn test_deposit_tokens() {
         .send()
         .unwrap();
     
-    MintTo::new(&mut ctx.anchor_ctx.svm, &user, &mint, &user_ata, 1_000_000)
+    MintTo::new(&mut ctx.anchor_ctx.svm, &user, &mint, &user_ata, 10_000_000)
+        .send()
+        .unwrap();
+
+    let ata_balance_before = ctx.anchor_ctx.get_account::<TokenAccount>(&user_ata).unwrap();
+    assert_eq!(ata_balance_before.amount, 10_000_000, "User ATA should have 10_000_000 tokens");
+
+    let vault = get_associated_token_address(&ctx.config, &mint);
+    let vault_balance_before = ctx.anchor_ctx.get_account::<TokenAccount>(&vault);
+    assert!(vault_balance_before.is_err(), "Vault should not be initialized");
+
+    // Deposit tokens
+    deposit(&mut ctx, &user, user_pda, mint, 5_000_000).unwrap();
+
+    let ata_balance_after = ctx.anchor_ctx.get_account::<TokenAccount>(&user_ata).unwrap();
+    assert_eq!(ata_balance_after.amount, 5_000_000, "User ATA should have 5_000_000 tokens");
+    
+    let user_account = ctx.anchor_ctx.get_account::<User>(&user_pda).expect("Failed to get user account");
+    assert_eq!(user_account.positions[0].mint, mint, "Position 0 should have mint");
+    assert_eq!(user_account.positions[0].amount, 5_000_000, "Position 0 should have 5_000_000 tokens");
+
+    assert_eq!(user_account.positions[1].mint, Pubkey::default(), "Position 1 should have default mint");
+    assert_eq!(user_account.positions[1].amount, 0, "Position 1 should have default amount");
+
+    let vault_balance_after = ctx.anchor_ctx.get_account::<TokenAccount>(&vault).unwrap();
+    assert_eq!(vault_balance_after.amount, 5_000_000, "Vault should have 5_000_000 tokens");
+
+    // Create new token mint and mint tokens to the user
+    let mint_2 = CreateMint::new(&mut ctx.anchor_ctx.svm, &user)
+        .authority(&user.pubkey())
+        .decimals(DECIMALS)
         .send()
         .unwrap();
     
-    // Deposit tokens
-    deposit(&mut ctx, &user, user_pda, mint, 500_000).unwrap();
+    let user_ata_2 = CreateAssociatedTokenAccount::new(&mut ctx.anchor_ctx.svm, &user, &mint_2)
+        .owner(&user.pubkey())
+        .send()
+        .unwrap();
+    
+    MintTo::new(&mut ctx.anchor_ctx.svm, &user, &mint_2, &user_ata_2, 10_000_000)
+        .send()
+        .unwrap();
+
+    deposit(&mut ctx, &user, user_pda, mint_2, 6_500_000).unwrap();
+
+    let user_account = ctx.anchor_ctx.get_account::<User>(&user_pda).expect("Failed to get user account");
+    assert_eq!(user_account.positions[0].mint, mint, "Position 0 should be unchanged");
+    assert_eq!(user_account.positions[0].amount, 5_000_000, "Position 0 should be unchanged");
+
+    assert_eq!(user_account.positions[1].mint, mint_2, "Position 1 should have mint_2");
+    assert_eq!(user_account.positions[1].amount, 6_500_000, "Position 1 should have 6_500_000 tokens");
+
+    assert_eq!(user_account.positions[2].mint, Pubkey::default(), "Position 2 should have default mint");
+    assert_eq!(user_account.positions[2].amount, 0, "Position 2 should have default amount");
     
     println!("✅ Tokens deposited successfully");
 }
@@ -598,6 +659,20 @@ fn test_deposit_and_withdraw() {
     // Withdraw tokens
     withdraw(&mut ctx, &user, user_pda, mint, 200_000).unwrap();
     println!("✅ Tokens withdrawn successfully");
+
+    let user_account = ctx.anchor_ctx.get_account::<User>(&user_pda).expect("Failed to get user account");
+    assert_eq!(user_account.positions[0].mint, mint, "Position 0 should have mint");
+    assert_eq!(user_account.positions[0].amount, 300_000, "Position 0 should have 300_000 tokens");
+
+    assert_eq!(user_account.positions[1].mint, Pubkey::default(), "Position 1 should have default mint");
+    assert_eq!(user_account.positions[1].amount, 0, "Position 1 should have default amount");
+
+    let ata_balance_after = ctx.anchor_ctx.get_account::<TokenAccount>(&user_ata).unwrap();
+    assert_eq!(ata_balance_after.amount, 700_000, "User ATA should have 700_000 tokens");
+
+    let vault = get_associated_token_address(&ctx.config, &mint);
+    let vault_balance_after = ctx.anchor_ctx.get_account::<TokenAccount>(&vault).unwrap();
+    assert_eq!(vault_balance_after.amount, 300_000, "Vault should have 300_000 tokens");
 }
 
 #[test]
@@ -630,6 +705,16 @@ fn test_create_liquidity_pool() {
     // Verify the pool was created
     let lp_account = ctx.anchor_ctx.get_account::<LiquidityPool>(&lp).expect("Failed to get liquidity pool account");
     assert!(lp_account.authority.eq(&ctx.admin.pubkey()), "LP account should have authority");
+    assert_eq!(lp_account.status, LiquidityPoolStatus::Paused, "LP account should be paused");
+    assert_eq!(lp_account.mint_a, mint_a, "LP account should have mint_a");
+    assert_eq!(lp_account.mint_b, mint_b, "LP account should have mint_b");
+    assert_eq!(lp_account.vault_a, get_associated_token_address(&ctx.config, &mint_a), "LP account should have vault_a");
+    assert_eq!(lp_account.vault_b, get_associated_token_address(&ctx.config, &mint_b), "LP account should have vault_b");
+    assert_eq!(lp_account.virtual_reserve_a, 0, "LP account should have virtual_reserve_a");
+    assert_eq!(lp_account.virtual_reserve_b, 0, "LP account should have virtual_reserve_b");
+    assert_eq!(lp_account.lp_mint, mint_lp, "LP account should have lp_mint");
+    assert_eq!(lp_account.lp_supply, 0, "LP account should have lp_supply");
+    assert_eq!(lp_account.pool_fee_bps, 100, "LP account should have pool_fee_bps");
     
     println!("✅ Liquidity pool created at {}", lp);
     println!("✅ LP token mint created at {}", mint_lp);
@@ -700,6 +785,22 @@ fn test_add_liquidity() {
         2_000_000, // max token B
     )
     .unwrap();
+
+    let user_account = ctx.anchor_ctx.get_account::<User>(&user_pda).expect("Failed to get user account");
+    assert_eq!(user_account.positions[0].mint, mint_a, "Position 0 should have mint_a");
+    assert_eq!(user_account.positions[0].amount, 3_000_000, "Position 0 should have 3_000_000 tokens");
+
+    assert_eq!(user_account.positions[1].mint, mint_b, "Position 1 should have mint_b");
+    assert_eq!(user_account.positions[1].amount, 3_000_000, "Position 1 should have 3_000_000 tokens");
+
+    assert_eq!(user_account.positions[2].mint, mint_lp, "Position 2 should have mint_lp");
+    assert_eq!(user_account.positions[2].amount, 1_000_000, "Position 2 should have 1_000_000 tokens");
+
+    let lp_account = ctx.anchor_ctx.get_account::<LiquidityPool>(&lp).expect("Failed to get liquidity pool account");
+    assert_eq!(lp_account.status, LiquidityPoolStatus::Active, "LP account should be active");
+    assert_eq!(lp_account.virtual_reserve_a, 2_000_000, "LP account should have virtual_reserve_a");
+    assert_eq!(lp_account.virtual_reserve_b, 2_000_000, "LP account should have virtual_reserve_b");
+    assert_eq!(lp_account.lp_supply, 1_000_000, "LP account should have lp_supply");
     
     println!("✅ Liquidity added successfully");
 }
@@ -782,6 +883,22 @@ fn test_add_and_remove_liquidity() {
         0,       // min token B
     )
     .unwrap();
+
+    let user_account = ctx.anchor_ctx.get_account::<User>(&user_pda).expect("Failed to get user account");
+    assert_eq!(user_account.positions[0].mint, mint_a, "Position 0 should have mint_a");
+    assert_eq!(user_account.positions[0].amount, 4_000_000, "Position 0 should have 4_000_000 tokens");
+
+    assert_eq!(user_account.positions[1].mint, mint_b, "Position 1 should have mint_b");
+    assert_eq!(user_account.positions[1].amount, 4_000_000, "Position 1 should have 4_000_000 tokens");
+
+    assert_eq!(user_account.positions[2].mint, mint_lp, "Position 2 should have mint_lp");
+    assert_eq!(user_account.positions[2].amount, 500_000, "Position 2 should have 500_000 tokens");
+
+    let lp_account = ctx.anchor_ctx.get_account::<LiquidityPool>(&lp).expect("Failed to get liquidity pool account");
+    assert_eq!(lp_account.status, LiquidityPoolStatus::Active, "LP account should be active");
+    assert_eq!(lp_account.virtual_reserve_a, 1_000_000, "LP account should have virtual_reserve_a");
+    assert_eq!(lp_account.virtual_reserve_b, 1_000_000, "LP account should have virtual_reserve_b");
+    assert_eq!(lp_account.lp_supply, 500_000, "LP account should have lp_supply");
     
     println!("✅ Liquidity removed successfully");
 }
@@ -873,6 +990,13 @@ fn test_swap() {
 
     assert_eq!(lp_data_after.virtual_reserve_a, 5_100_000);
     assert!(lp_data_after.virtual_reserve_b - 4_900_000 < 5000);  // difference is commission and CP delta
+
+    let user_account = ctx.anchor_ctx.get_account::<User>(&user_pda).expect("Failed to get user account");
+    assert_eq!(user_account.positions[0].mint, mint_a, "Position 0 should have mint_a");
+    assert_eq!(user_account.positions[0].amount, 2_900_000, "Position 0 should have 2_900_000 tokens");
+
+    assert_eq!(user_account.positions[1].mint, mint_b, "Position 1 should have mint_b");
+    assert!(3_100_000 - user_account.positions[1].amount < 5000, "Position 1 should be within 5000 tokens of 3_100_000 tokens with tolerance for pool fee and CP delta");
     
     println!("✅ Swap successful");
 }
@@ -915,7 +1039,15 @@ fn test_transfer_between_users() {
     
     // Transfer from user1 to user2
     transfer(&mut ctx, &user1, user1_pda, user2_pda, mint, 200_000).unwrap();
-    
+
+    let user1_account = ctx.anchor_ctx.get_account::<User>(&user1_pda).expect("Failed to get user1 account");
+    assert_eq!(user1_account.positions[0].mint, mint, "Position 0 should have mint");
+    assert_eq!(user1_account.positions[0].amount, 300_000, "Position 0 should have 300_000 tokens");
+
+    let user2_account = ctx.anchor_ctx.get_account::<User>(&user2_pda).expect("Failed to get user2 account");
+    assert_eq!(user2_account.positions[0].mint, mint, "Position 0 should have mint");
+    assert_eq!(user2_account.positions[0].amount, 200_000, "Position 0 should have 200_000 tokens");
+
     println!("✅ Transfer successful from user1 to user2");
 }
 
@@ -1044,6 +1176,13 @@ fn test_multiple_deposits_same_mint() {
     
     deposit(&mut ctx, &user, user_pda, mint, 1_500_000).unwrap();
     println!("✅ Third deposit");
+
+    let user_account = ctx.anchor_ctx.get_account::<User>(&user_pda).expect("Failed to get user account");
+    assert_eq!(user_account.positions[0].mint, mint, "Position 0 should have mint");
+    assert_eq!(user_account.positions[0].amount, 4_500_000, "Position 0 should have 4_500_000 tokens");
+
+    assert_eq!(user_account.positions[1].mint, Pubkey::default(), "Position 1 should have default mint");
+    assert_eq!(user_account.positions[1].amount, 0, "Position 1 should have default amount");
     
     println!("✅ Multiple deposits to same mint successful");
 }
