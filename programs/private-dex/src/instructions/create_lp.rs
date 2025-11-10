@@ -86,7 +86,7 @@ impl<'info> CreateLp<'info> {
             bump,
             mint_lp_bump,
             status: LiquidityPoolStatus::Paused,
-            authority: self.sender.key(),
+            authority: self.config.admin,
             mint_a: self.mint_a.key(),
             mint_b: self.mint_b.key(),
             vault_a: self.vault_a.key(),
