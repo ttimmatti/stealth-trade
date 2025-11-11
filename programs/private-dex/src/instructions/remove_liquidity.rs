@@ -3,7 +3,7 @@ use crate::state::{
     Config, LiquidityPool, User
 };
 use crate::constants::*;
-use crate::utils::get_position;
+use crate::utils::{decrease_position, increase_position};
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
@@ -95,10 +95,7 @@ impl<'info> RemoveLiquidity<'info> {
             false => self.mint_b.to_account_info(),
         };
 
-        let user_position = get_position(&mut self.user.positions, mint.key())?;
-
-        user_position.mint = mint.key();
-        user_position.amount += amount;
+        increase_position(&mut self.user.positions, mint.key(), amount)?;
 
         let virtual_reserve = match is_x {
             true => &mut self.lp.virtual_reserve_a,
@@ -112,13 +109,7 @@ impl<'info> RemoveLiquidity<'info> {
 
     /// Virtual burning of LP tokens from user
     pub fn burn_lp_tokens(&mut self, amount: u64) -> Result<()> {
-        let user_position = get_position(&mut self.user.positions, self.mint_lp.key())?;
-
-        require_keys_eq!(user_position.mint, self.mint_lp.key(), ErrorCode::PositionNotFound);
-        require!(user_position.amount >= amount, ErrorCode::InsufficientBalance);
-
-        user_position.mint = self.mint_lp.key();
-        user_position.amount -= amount;
+        decrease_position(&mut self.user.positions, self.mint_lp.key(), amount)?;
 
         require!(self.lp.lp_supply >= amount, ErrorCode::InsufficientPoolBalance);
         self.lp.lp_supply -= amount;

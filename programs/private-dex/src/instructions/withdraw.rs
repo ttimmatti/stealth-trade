@@ -1,5 +1,5 @@
 use crate::errors::ErrorCode;
-use crate::utils::get_position;
+use crate::utils::{decrease_position};
 use crate::state::{Config, User};
 use crate::constants::*;
 use anchor_lang::prelude::*;
@@ -52,7 +52,7 @@ impl<'info> Withdraw<'info> {
     pub fn withdraw(&mut self, amount: u64) -> Result<()> {
         require!(!self.config.paused, ErrorCode::Paused);
 
-        self.decrease_position(amount)?;
+        decrease_position(&mut self.user.positions, self.mint.key(), amount)?;
         self.withdraw_tokens(amount)?;
 
         Ok(())
@@ -73,16 +73,6 @@ impl<'info> Withdraw<'info> {
         );
 
         transfer_checked(transfer_ctx, amount, self.mint.decimals)?;
-
-        Ok(())
-    }
-
-    pub fn decrease_position(&mut self, amount: u64) -> Result<()> {
-        let position = get_position(&mut self.user.positions, self.mint.key())?;
-
-        require_keys_eq!(position.mint, self.mint.key(), ErrorCode::PositionNotFound);
-        require!(position.amount >= amount, ErrorCode::InsufficientBalance);
-        position.amount -= amount;
 
         Ok(())
     }

@@ -1,5 +1,5 @@
 use crate::errors::ErrorCode;
-use crate::utils::get_position;
+use crate::utils::{increase_position};
 use crate::state::{Config, User};
 use crate::constants::*;
 use anchor_lang::prelude::*;
@@ -53,7 +53,7 @@ impl<'info> Deposit<'info> {
         require!(!self.config.paused, ErrorCode::Paused);
 
         self.deposit_tokens(amount)?;
-        self.increase_position(amount)?;
+        increase_position(&mut self.user.positions, self.mint.key(), amount)?;
 
         Ok(())
     }
@@ -70,15 +70,6 @@ impl<'info> Deposit<'info> {
         );
 
         transfer_checked(transfer_ctx, amount, self.mint.decimals)?;
-
-        Ok(())
-    }
-
-    pub fn increase_position(&mut self, amount: u64) -> Result<()> {
-        let position = get_position(&mut self.user.positions, self.mint.key())?;
-
-        position.mint = self.mint.key();
-        position.amount += amount;
 
         Ok(())
     }

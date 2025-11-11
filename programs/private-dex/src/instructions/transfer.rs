@@ -1,5 +1,5 @@
 use crate::errors::ErrorCode;
-use crate::utils::get_position;
+use crate::utils::{decrease_position, increase_position};
 use crate::state::{Config, User};
 use crate::constants::*;
 use anchor_lang::prelude::*;
@@ -47,17 +47,9 @@ impl<'info> Transfer<'info> {
     pub fn transfer(&mut self, amount: u64) -> Result<()> {
         require!(!self.config.paused, ErrorCode::Paused);
 
-        let source_user_position = get_position(&mut self.user.positions, self.mint.key())?;
+        decrease_position(&mut self.user.positions, self.mint.key(), amount)?;
         
-        require_keys_eq!(source_user_position.mint, self.mint.key(), ErrorCode::PositionNotFound);
-        require!(source_user_position.amount >= amount, ErrorCode::InsufficientBalance);
-        
-        let destination_user_position = get_position(&mut self.destination_user.positions, self.mint.key())?;
-
-        destination_user_position.mint = self.mint.key();
-
-        source_user_position.amount -= amount;
-        destination_user_position.amount += amount;
+        increase_position(&mut self.destination_user.positions, self.mint.key(), amount)?;
 
         Ok(())
     }

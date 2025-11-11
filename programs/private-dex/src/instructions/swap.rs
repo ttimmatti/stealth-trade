@@ -1,7 +1,7 @@
 use crate::errors::ErrorCode;
 use crate::state::{Config, LiquidityPool, LiquidityPoolStatus, User};
 use crate::constants::*;
-use crate::utils::get_position;
+use crate::utils::{decrease_position, increase_position};
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
@@ -87,11 +87,7 @@ impl<'info> Swap<'info> {
             false => self.mint_b.to_account_info(),
         };
 
-        let user_position = get_position(&mut self.user.positions, mint.key())?;
-
-        require_keys_eq!(user_position.mint, mint.key(), ErrorCode::PositionNotFound);
-        require!(user_position.amount >= amount, ErrorCode::InsufficientBalance);
-        user_position.amount -= amount;
+        decrease_position(&mut self.user.positions, mint.key(), amount)?;
 
         let virtual_reserve = match is_x {
             true => &mut self.lp.virtual_reserve_a,
@@ -109,10 +105,7 @@ impl<'info> Swap<'info> {
             false => self.mint_b.to_account_info(),
         };
 
-        let user_position = get_position(&mut self.user.positions, mint.key())?;
-
-        user_position.mint = mint.key();
-        user_position.amount += amount;
+        increase_position(&mut self.user.positions, mint.key(), amount)?;
 
         let virtual_reserve = match is_x {
             true => &mut self.lp.virtual_reserve_a,
