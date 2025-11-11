@@ -1,8 +1,7 @@
 use anchor_litesvm::{AnchorContext, AnchorLiteSVM};
 use anchor_spl::token_interface::TokenAccount;
 use private_dex::{constants::MAX_POSITIONS, instruction, state::{Config, LiquidityPool, LiquidityPoolStatus, User}};
-use anchor_lang::{AnchorDeserialize, InstructionData, ToAccountMetas, system_program};
-use litesvm::LiteSVM;
+use anchor_lang::{InstructionData, ToAccountMetas, system_program};
 use solana_sdk::{
     instruction::Instruction, 
     pubkey::Pubkey, 
