@@ -675,6 +675,50 @@ fn test_deposit_and_withdraw() {
 }
 
 #[test]
+fn test_withdraw() {
+    let mut ctx = TestContext::new();
+    
+    // Initialize the config
+    initialize_config(&mut ctx).unwrap();
+    
+    // Create a user
+    let user = Keypair::new();
+    ctx.anchor_ctx.airdrop(&user.pubkey(), 10_000_000_000).unwrap();
+    let user_pda = create_user(&mut ctx, &user).unwrap();
+    
+    // Create a token mint and mint tokens to the user
+    let mint = CreateMint::new(&mut ctx.anchor_ctx.svm, &user)
+        .authority(&user.pubkey())
+        .decimals(DECIMALS)
+        .send()
+        .unwrap();
+    
+    let user_ata = CreateAssociatedTokenAccount::new(&mut ctx.anchor_ctx.svm, &user, &mint)
+        .owner(&user.pubkey())
+        .send()
+        .unwrap();
+    
+    MintTo::new(&mut ctx.anchor_ctx.svm, &user, &mint, &user_ata, 1_000_000)
+        .send()
+        .unwrap();
+    
+    // Deposit tokens
+    deposit(&mut ctx, &user, user_pda, mint, 500_000).unwrap();
+    println!("✅ Tokens deposited");
+    
+    // Try withdraw more tokens than deposited
+    withdraw(&mut ctx, &user, user_pda, mint, 500_001).expect_err("Should return error");
+    println!("✅ Error: Insufficient balance");
+
+    withdraw(&mut ctx, &user, user_pda, mint, 500_000).unwrap();
+    println!("✅ Max Tokens withdrawn successfully");
+
+    let user_account = ctx.anchor_ctx.get_account::<User>(&user_pda).expect("Failed to get user account");
+    assert_eq!(user_account.positions[0].mint, Pubkey::default(), "Position 0 should have default mint");
+    assert_eq!(user_account.positions[0].amount, 0, "Position 0 should have 0 tokens");
+}
+
+#[test]
 fn test_create_liquidity_pool() {
     let mut ctx = TestContext::new();
     
