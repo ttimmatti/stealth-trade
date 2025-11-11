@@ -11,6 +11,10 @@ path = "private-dex-tests.rs"
 name = "example-tests"
 path = "example-tests.rs"
 
+[[test]]
+name = "permission-tests"
+path = "permission-tests.rs"
+
 [dependencies]
 private_dex = { path = "../programs/private-dex", features = ["no-entrypoint"] }
 anchor-lang = { workspace = true }
