@@ -20,6 +20,13 @@ pub const LP_MINT_SEED: &[u8] = b"lp_mint";
 pub const LP_DECIMALS: u8 = 6;
 pub const DECIMALS: u8 = 6;
 
+// MagicBlock delegate program
+pub const DELEGATE_PROGRAM_ID: Pubkey = Pubkey::from_str_const("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
+// localnet ER validator for tests
+pub const ER_VALIDATOR_ID: Pubkey = Pubkey::from_str_const("mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev");
+// MagicBlock permission program
+pub const PERMISSION_PROGRAM_ID: Pubkey = Pubkey::from_str_const("BTWAqWNBmF2TboMh3fxMJfgR16xGHYD7Kgr2dPwbRPBi");
+
 // ============================================================================
 // Helper Types and Context
 // ============================================================================
@@ -65,6 +72,9 @@ pub fn initialize_config(ctx: &mut TestContext) -> Result<(), Box<dyn std::error
     let accounts = private_dex::accounts::Initialize {
         sender: ctx.admin.pubkey(),
         config: ctx.config,
+        delegate_program: DELEGATE_PROGRAM_ID,
+        er_validator: ER_VALIDATOR_ID,
+        permission_program: PERMISSION_PROGRAM_ID,
         system_program: system_program::ID,
     };
     

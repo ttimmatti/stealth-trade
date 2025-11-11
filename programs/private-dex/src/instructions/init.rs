@@ -17,6 +17,13 @@ pub struct Initialize<'info> {
     )]
     pub config: Account<'info, Config>,
 
+    /// CHECK: MagicBlock delegate program
+    pub delegate_program: UncheckedAccount<'info>,
+    /// CHECK: MagicBlock ER validator
+    pub er_validator: UncheckedAccount<'info>,
+    /// CHECK: MagicBlock permission program
+    pub permission_program: UncheckedAccount<'info>,
+
     pub system_program: Program<'info, System>,
 }
 
@@ -26,8 +33,11 @@ impl<'info> Initialize<'info> {
 
         self.config.set_inner(Config {
             bump: bumps.config,
-            admin: self.sender.key(),
             paused: false,
+            admin: self.sender.key(),
+            delegate_program: self.delegate_program.key(),
+            er_validator: self.er_validator.key(),
+            permission_program: self.permission_program.key(),
             default_pool_fee_bps: 100, // 1%
         });
 
