@@ -70,6 +70,21 @@ pub mod private_dex {
         ctx.accounts.swap(is_x, amount, min)
     }
 
+    /// Creates a unique permission group and permission for a user account using the external permission program
+    pub fn create_user_permission(ctx: Context<CreateUserPermission>, group_id: Pubkey) -> Result<()> {
+        ctx.accounts.create_permission(group_id)
+    }
+
+    /// Creates a shared permission group and permission for a liquidity pool account using the external permission program
+    pub fn create_lp_permission_group(ctx: Context<CreateLpPermissionGroup>, group_id: Pubkey) -> Result<()> {
+        ctx.accounts.create_permission_group(group_id, ctx.remaining_accounts.iter().map(|a| a.key()).collect())
+    }
+
+    /// Creates a permission for a liquidity pool account for lp permission group using the external permission program
+    pub fn create_lp_permission(ctx: Context<CreateLpPermission>) -> Result<()> {
+        ctx.accounts.create_permission()
+    }
+
     // /// Initializes a deposit account for a user and token mint if it does not exist.
     // ///
     // /// Sets up a new deposit account with zero balance for the user and token mint.

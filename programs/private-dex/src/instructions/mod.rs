@@ -8,6 +8,9 @@ pub mod add_liquidity;
 pub mod remove_liquidity;
 pub mod transfer;
 pub mod swap;
+pub mod create_user_permission;
+pub mod create_lp_permission_group;
+pub mod create_lp_permission;
 
 pub use create_lp::*;
 pub use create_user::*;
@@ -19,3 +22,6 @@ pub use add_liquidity::*;
 pub use remove_liquidity::*;
 pub use transfer::*;
 pub use swap::*;
+pub use create_user_permission::*;
+pub use create_lp_permission_group::*;
+pub use create_lp_permission::*;
