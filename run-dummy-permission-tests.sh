@@ -1,2 +1,2 @@
 anchor build && \
-cargo test -p private-dex-tests --test private-dex-tests
+cargo test -p private-dex-tests --test permission-tests
