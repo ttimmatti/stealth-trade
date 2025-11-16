@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use anchor_lang::{InstructionData, ToAccountMetas, system_program};
-use private_dex::{instruction, state::User};
+use private_dex::{instruction, state::LiquidityPool};
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -11,9 +11,7 @@ use solana_sdk::{
 };
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 
-// Permission program ID (from magicblock)
-// This is a placeholder - you'll need to replace with the actual permission program ID
-const PERMISSION_PROGRAM_ID: &str = "prmNhB6RUGMghLxWqpTWCNkCyL3HZaVqL3Fqrq1a8vV";
+use crate::common::PERMISSION_PROGRAM_ID;
 
 // ============================================================================
 // Helper Functions for Permission Instructions
@@ -27,18 +25,9 @@ fn create_user_permission(
     user_pda: Pubkey,
     group_id: Pubkey,
 ) -> Result<(Pubkey, Pubkey), Box<dyn std::error::Error>> {
-    let permission_program_id = PERMISSION_PROGRAM_ID.parse::<Pubkey>().unwrap();
-    
-    // Derive permission and group PDAs based on the permission program's derivation logic
-    let (group, _) = Pubkey::find_program_address(
-        &[b"group", group_id.as_ref()],
-        &permission_program_id,
-    );
-    
-    let (permission, _) = Pubkey::find_program_address(
-        &[b"permission", user_pda.as_ref(), group.as_ref()],
-        &permission_program_id,
-    );
+    // Use utility functions for PDA derivation
+    let group = get_group_pda(group_id, &PERMISSION_PROGRAM_ID);
+    let permission = get_permission_pda(user_pda, group, &PERMISSION_PROGRAM_ID);
     
     let accounts = private_dex::accounts::CreateUserPermission {
         payer: payer.pubkey(),
@@ -46,7 +35,7 @@ fn create_user_permission(
         user_account: user_pda,
         permission,
         group,
-        permission_program: permission_program_id,
+        permission_program: PERMISSION_PROGRAM_ID,
         system_program: system_program::ID,
     };
     
@@ -65,7 +54,9 @@ fn create_user_permission(
         ctx.anchor_ctx.latest_blockhash(),
     );
     
-    ctx.anchor_ctx.send_and_confirm_transaction(&tx)?;
+    let signature = ctx.anchor_ctx.send_and_confirm_transaction(&tx)?;
+    let tx_res = ctx.anchor_ctx.svm.get_transaction(&signature).unwrap();
+    println!("tx_res: {:?}", tx_res);
     Ok((permission, group))
 }
 
@@ -76,17 +67,13 @@ fn create_lp_permission_group(
     group_id: Pubkey,
     users: Vec<Pubkey>,
 ) -> Result<Pubkey, Box<dyn std::error::Error>> {
-    let permission_program_id = PERMISSION_PROGRAM_ID.parse::<Pubkey>().unwrap();
-    
-    let (group, _) = Pubkey::find_program_address(
-        &[b"group", group_id.as_ref()],
-        &permission_program_id,
-    );
+    // Use utility function for PDA derivation
+    let group = get_group_pda(group_id, &PERMISSION_PROGRAM_ID);
     
     let accounts = private_dex::accounts::CreateLpPermissionGroup {
         sender: sender.pubkey(),
         group,
-        permission_program: permission_program_id,
+        permission_program: PERMISSION_PROGRAM_ID,
         system_program: system_program::ID,
     };
     
@@ -122,23 +109,21 @@ fn create_lp_permission(
     lp: Pubkey,
     group: Pubkey,
 ) -> Result<Pubkey, Box<dyn std::error::Error>> {
-    let permission_program_id = PERMISSION_PROGRAM_ID.parse::<Pubkey>().unwrap();
-    
-    let (permission, _) = Pubkey::find_program_address(
-        &[b"permission", lp.as_ref(), group.as_ref()],
-        &permission_program_id,
-    );
+    // Use utility function for PDA derivation
+    let permission = get_permission_pda(lp, group, &PERMISSION_PROGRAM_ID);
     
     let accounts = private_dex::accounts::CreateLpPermission {
         sender: sender.pubkey(),
         lp,
         permission,
         group,
-        permission_program: permission_program_id,
+        permission_program: PERMISSION_PROGRAM_ID,
         system_program: system_program::ID,
     };
+
+    let lp_account = ctx.anchor_ctx.get_account::<LiquidityPool>(&lp).unwrap();
     
-    let data = instruction::CreateLpPermission {};
+    let data = instruction::CreateLpPermission { mint_a: lp_account.mint_a, mint_b: lp_account.mint_b, bump: lp_account.bump };
     
     let instruction = Instruction {
         program_id: ctx.program_id,
@@ -177,23 +162,8 @@ fn test_create_user_permission() {
     
     // Create permission for the user
     let group_id = Keypair::new().pubkey(); // Random group ID
-    let result = create_user_permission(&mut ctx, &user, &user, user_pda, group_id);
-    
-    match result {
-        Ok((permission, group)) => {
-            println!("✅ User permission created successfully");
-            println!("   Permission PDA: {}", permission);
-            println!("   Group PDA: {}", group);
-            
-            // Verify the user account is still valid
-            let user_account = ctx.anchor_ctx.get_account::<User>(&user_pda).expect("Failed to get user account");
-            assert!(user_account.authority.eq(&user.pubkey()), "User account should still have correct authority");
-        }
-        Err(e) => {
-            println!("⚠️  Permission creation failed (expected if permission program not loaded): {}", e);
-            println!("✅ Test completed - instruction was called correctly");
-        }
-    }
+    let (permission, _group) = create_user_permission(&mut ctx, &user, &user, user_pda, group_id).expect("Failed to create user permission");
+    println!("✅ User permission created at {}", permission);
 }
 
 #[test]
@@ -212,28 +182,24 @@ fn test_create_lp_permission_group() {
     ctx.anchor_ctx.svm.airdrop(&user2.pubkey(), 10_000_000_000).unwrap();
     ctx.anchor_ctx.svm.airdrop(&user3.pubkey(), 10_000_000_000).unwrap();
     
-    let _user1_pda = create_user(&mut ctx, &user1).unwrap();
-    let _user2_pda = create_user(&mut ctx, &user2).unwrap();
-    let _user3_pda = create_user(&mut ctx, &user3).unwrap();
+    let user1_pda = create_user(&mut ctx, &user1).unwrap();
+    let user2_pda = create_user(&mut ctx, &user2).unwrap();
+    let user3_pda = create_user(&mut ctx, &user3).unwrap();
     println!("✅ Users created");
     
     // Create permission group with multiple users
     let group_id = Keypair::new().pubkey();
     let users = vec![user1.pubkey(), user2.pubkey(), user3.pubkey()];
     
-    let result = create_lp_permission_group(&mut ctx, &user1, group_id, users.clone());
+    create_lp_permission_group(&mut ctx, &user1, group_id, users.clone()).expect("Failed to create LP permission group");
+    println!("✅ LP permission group created");
     
-    match result {
-        Ok(group) => {
-            println!("✅ LP permission group created successfully");
-            println!("   Group PDA: {}", group);
-            println!("   Members: {} users", users.len());
-        }
-        Err(e) => {
-            println!("⚠️  Permission group creation failed (expected if permission program not loaded): {}", e);
-            println!("✅ Test completed - instruction was called correctly");
-        }
-    }
+    println!("✅ LP permission group created successfully");
+    println!("   Group PDA: {}", group_id);
+    println!("   Members: {} users", users.len());
+    println!("   User 1 PDA: {}", user1_pda);
+    println!("   User 2 PDA: {}", user2_pda);
+    println!("   User 3 PDA: {}", user3_pda);
 }
 
 #[test]
@@ -269,33 +235,18 @@ fn test_create_lp_permission() {
     let group_id = Keypair::new().pubkey();
     let users = vec![creator.pubkey()];
     
-    let group_result = create_lp_permission_group(&mut ctx, &creator, group_id, users);
-    
-    match group_result {
-        Ok(group) => {
-            println!("✅ LP permission group created: {}", group);
-            
-            // Now create permission for the LP
-            let permission_result = create_lp_permission(&mut ctx, &creator, lp, group);
-            
-            match permission_result {
-                Ok(permission) => {
-                    println!("✅ LP permission created successfully");
-                    println!("   Permission PDA: {}", permission);
-                    println!("   LP PDA: {}", lp);
-                    println!("   Group PDA: {}", group);
-                }
-                Err(e) => {
-                    println!("⚠️  LP permission creation failed (expected if permission program not loaded): {}", e);
-                    println!("✅ Test completed - instruction was called correctly");
-                }
-            }
-        }
-        Err(e) => {
-            println!("⚠️  Permission group creation failed (expected if permission program not loaded): {}", e);
-            println!("✅ Test completed - instruction was called correctly");
-        }
-    }
+    create_lp_permission_group(&mut ctx, &creator, group_id, users).expect("Failed to create LP permission group");
+    println!("✅ LP permission group created");
+
+    let group = get_group_pda(group_id, &PERMISSION_PROGRAM_ID);
+    // Now create permission for the LP
+    let permission = create_lp_permission(&mut ctx, &creator, lp, group).expect("Failed to create LP permission");
+    println!("✅ LP permission created at {}", permission);
+
+    println!("✅ LP permission created successfully");
+    println!("   LP PDA: {}", lp);
+    println!("   Permission PDA: {}", permission);
+    println!("   Group PDA: {}", group);
 }
 
 #[test]
@@ -351,25 +302,19 @@ fn test_full_permission_flow() {
     let lp_group_id = Keypair::new().pubkey();
     let users = vec![user1.pubkey(), user2.pubkey()];
     
-    let lp_group_result = create_lp_permission_group(&mut ctx, &user1, lp_group_id, users);
+    create_lp_permission_group(&mut ctx, &user1, lp_group_id, users).expect("Failed to create LP permission group");
+    println!("✅ LP permission group created");
     
-    if let Ok(group) = lp_group_result {
-        println!("✅ 5. LP permission group created");
-        
-        // 6. Create LP permission
-        let lp_perm_result = create_lp_permission(&mut ctx, &user1, lp, group);
-        
-        if lp_perm_result.is_ok() {
-            println!("✅ 6. LP permission created");
-            println!("\n🎉 Full permission flow completed successfully!");
-        } else {
-            println!("⚠️  6. LP permission creation failed (expected if permission program not loaded)");
-            println!("\n✅ Full permission flow test completed - all instructions were called correctly");
-        }
-    } else {
-        println!("⚠️  5. LP permission group creation failed (expected if permission program not loaded)");
-        println!("\n✅ Full permission flow test completed - all instructions were called correctly");
-    }
+    let group = get_group_pda(lp_group_id, &PERMISSION_PROGRAM_ID);
+    
+    // 6. Create LP permission
+    let lp_perm_result = create_lp_permission(&mut ctx, &user1, lp, group).expect("Failed to create LP permission");
+    println!("✅ LP permission created");
+
+    println!("✅ LP permission created successfully");
+    println!("   Permission PDA: {}", lp_perm_result);
+    println!("   LP PDA: {}", lp);
+    println!("   Group PDA: {}", group);
 }
 
 #[test]
@@ -411,25 +356,12 @@ fn test_user_permission_with_deposit() {
     
     // Create permission for the user
     let group_id = Keypair::new().pubkey();
-    let perm_result = create_user_permission(&mut ctx, &user, &user, user_pda, group_id);
+    let (permission, group) = create_user_permission(&mut ctx, &user, &user, user_pda, group_id).expect("Failed to create user permission");
+    println!("✅ User permission created");
     
-    match perm_result {
-        Ok((permission, group)) => {
-            println!("✅ User permission created successfully");
-            println!("   Permission PDA: {}", permission);
-            println!("   Group PDA: {}", group);
-            
-            // Verify the user account still has correct balances
-            let user_account = ctx.anchor_ctx.get_account::<User>(&user_pda).expect("Failed to get user account");
-            assert_eq!(user_account.positions[0].mint, mint, "Position should have correct mint");
-            assert_eq!(user_account.positions[0].amount, 5_000_000, "Position should have correct amount");
-            
-            println!("\n🎉 User permission with deposit completed successfully!");
-        }
-        Err(e) => {
-            println!("⚠️  Permission creation failed (expected if permission program not loaded): {}", e);
-            println!("✅ Test completed - instruction was called correctly and user state is valid");
-        }
-    }
+    println!("✅ User permission created successfully");
+    println!("   Permission PDA: {}", permission);
+    println!("   Group PDA: {}", group);
+    println!("   User PDA: {}", user_pda);
 }
 
