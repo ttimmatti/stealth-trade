@@ -22,13 +22,14 @@ pub struct DelegateUser<'info> {
     #[account(address = config.er_validator @ ErrorCode::InvalidERValidator)]
     pub validator: UncheckedAccount<'info>,
 
+    /// CHECK: User account checked by the delegate program
     #[account(
         mut,
         del,
         seeds = [USER_SEED, user.as_ref()],
         bump,
     )]
-    pub user_account: Account<'info, User>,
+    pub user_account: UncheckedAccount<'info>,
 }
 
 impl<'info> DelegateUser<'info> {
@@ -68,12 +69,13 @@ pub struct UndelegateUser<'info> {
     )]
     pub session_token: Option<Account<'info, SessionToken>>,
 
+    /// CHECK: User account checked by the delegate program
     #[account(
         mut,
         seeds = [USER_SEED, user.key().as_ref()],
         bump
     )]
-    pub user_account: Account<'info, User>,
+    pub user_account: UncheckedAccount<'info>,
 }
 
 impl<'info> UndelegateUser<'info> {

@@ -1,5 +1,5 @@
 use anchor_litesvm::{AnchorContext, AnchorLiteSVM};
-use private_dex::instruction;
+use private_dex::{instruction, state::LiquidityPool};
 use anchor_lang::{InstructionData, ToAccountMetas, system_program};
 use solana_sdk::{
     instruction::Instruction, 
@@ -568,8 +568,12 @@ pub fn delegate_lp(
     payer: &Keypair,
     lp: Pubkey,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let lp_account = ctx.anchor_ctx.get_account::<LiquidityPool>(&lp).unwrap();
     
-    let data = instruction::DelegateLp {};
+    let data = instruction::DelegateLp {
+        mint_a: lp_account.mint_a,
+        mint_b: lp_account.mint_b,
+    };
     
     // Manually construct account metas for the delegate instruction
     let accounts = private_dex::accounts::DelegateLp {

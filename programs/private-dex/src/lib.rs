@@ -96,13 +96,13 @@ pub mod private_dex {
     }
 
     /// Delegates a liquidity pool account to the ephemeral rollups delegate program
-    pub fn delegate_lp(ctx: Context<DelegateLp>) -> Result<()> {
-        ctx.accounts.delegate()
+    pub fn delegate_lp(ctx: Context<DelegateLp>, mint_a: Pubkey, mint_b: Pubkey) -> Result<()> {
+        ctx.accounts.delegate(mint_a, mint_b)
     }
 
     /// Commits and undelegates a liquidity pool account from the ephemeral rollups program
-    pub fn commit_and_undelegate_lp(ctx: Context<UndelegateLp>) -> Result<()> {
-        ctx.accounts.commit_and_undelegate()
+    pub fn commit_and_undelegate_lp(ctx: Context<UndelegateLp>, mint_a: Pubkey, mint_b: Pubkey) -> Result<()> {
+        ctx.accounts.commit_and_undelegate(mint_a, mint_b)
     }
 
     // /// Initializes a deposit account for a user and token mint if it does not exist.
