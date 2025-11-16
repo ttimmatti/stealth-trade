@@ -24,4 +24,10 @@ pub enum ErrorCode {
     PoolNotActive,
     #[msg("Liquidity Pool Overflow")]
     LiquidityPoolOverflow,
+    #[msg("Invalid ER Validator")]
+    InvalidERValidator,
+    #[msg("Session Not Authenticated")]
+    SessionNotAuthenticated,
+    #[msg("Session Not Authorized")]
+    SessionNotAuthorized,
 }

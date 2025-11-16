@@ -9,7 +9,7 @@ pub mod constants;
 
 use instructions::*;
 
-declare_id!("GVn2HeDBhMRKidC1ZhmoHWCU1ABsjLaCaPoarVXXhx9u");
+declare_id!("rkzCttu6jXQ5hnLcZAkZVGsvyWd4TKKxVuTmbxqwvgt");
 
 #[ephemeral]
 #[program]
@@ -81,8 +81,28 @@ pub mod private_dex {
     }
 
     /// Creates a permission for a liquidity pool account for lp permission group using the external permission program
-    pub fn create_lp_permission(ctx: Context<CreateLpPermission>) -> Result<()> {
-        ctx.accounts.create_permission()
+    pub fn create_lp_permission(ctx: Context<CreateLpPermission>, mint_a: Pubkey, mint_b: Pubkey, bump: u8) -> Result<()> {
+        ctx.accounts.create_permission(mint_a, mint_b, bump)
+    }
+
+    /// Delegates a user account to the ephemeral rollups delegate program
+    pub fn delegate_user(ctx: Context<DelegateUser>, user: Pubkey) -> Result<()> {
+        ctx.accounts.delegate(user)
+    }
+
+    /// Commits and undelegates a user account from the ephemeral rollups program
+    pub fn commit_and_undelegate_user(ctx: Context<UndelegateUser>) -> Result<()> {
+        ctx.accounts.commit_and_undelegate()
+    }
+
+    /// Delegates a liquidity pool account to the ephemeral rollups delegate program
+    pub fn delegate_lp(ctx: Context<DelegateLp>) -> Result<()> {
+        ctx.accounts.delegate()
+    }
+
+    /// Commits and undelegates a liquidity pool account from the ephemeral rollups program
+    pub fn commit_and_undelegate_lp(ctx: Context<UndelegateLp>) -> Result<()> {
+        ctx.accounts.commit_and_undelegate()
     }
 
     // /// Initializes a deposit account for a user and token mint if it does not exist.

@@ -1,0 +1,86 @@
+use crate::errors::ErrorCode;
+use crate::state::{Config, LiquidityPool};
+use crate::constants::*;
+use anchor_lang::prelude::*;
+use ephemeral_rollups_sdk::anchor::{commit, delegate};
+use ephemeral_rollups_sdk::cpi::DelegateConfig;
+use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
+
+#[delegate]
+#[derive(Accounts)]
+pub struct DelegateLp<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,  // allow unauthorized delegation for destination transfer
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
+    /// CHECK: MagicBlock ER validator
+    #[account(address = config.er_validator @ ErrorCode::InvalidERValidator)]
+    pub validator: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        del,
+        seeds = [LIQUIDITY_POOL_SEED, lp_account.mint_a.key().as_ref(), lp_account.mint_b.key().as_ref()],
+        bump,
+    )]
+    pub lp_account: Account<'info, LiquidityPool>,
+}
+
+impl<'info> DelegateLp<'info> {
+    /// Delegates the liquidity pool account to the ephemeral rollups delegate program.
+    ///
+    /// Uses the ephemeral rollups delegate CPI to delegate the liquidity pool account.
+    pub fn delegate(&mut self) -> Result<()> {
+        let signer_seeds: &[&[u8]] = &[LIQUIDITY_POOL_SEED, self.lp_account.mint_a.as_ref(), self.lp_account.mint_b.as_ref()];
+
+        self.delegate_lp_account(
+            &self.payer,
+            signer_seeds,
+            DelegateConfig {
+                validator: Some(self.validator.key()),
+                ..DelegateConfig::default()
+            },
+        )?;
+        
+        Ok(())
+    }
+}
+
+#[commit]
+#[derive(Accounts)]
+pub struct UndelegateLp<'info> {
+    #[account(
+        mut,
+        address = config.admin  // only admin can undelegate
+    )]
+    pub payer: Signer<'info>,
+
+    #[account(
+        seeds = [CONFIG_SEED],
+        bump = config.bump
+    )]
+    pub config: Account<'info, Config>,
+
+    #[account(
+        mut,
+        seeds = [LIQUIDITY_POOL_SEED, lp_account.mint_a.key().as_ref(), lp_account.mint_b.key().as_ref()],
+        bump
+    )]
+    pub lp_account: Account<'info, LiquidityPool>,
+}
+
+impl<'info> UndelegateLp<'info> {
+    /// Commits and undelegates the deposit account from the ephemeral rollups program.
+    ///
+    /// Uses the ephemeral rollups SDK to commit and undelegate the deposit account.
+    pub fn commit_and_undelegate(&mut self) -> Result<()> {
+        commit_and_undelegate_accounts(
+            &self.payer,
+            vec![&self.lp_account.to_account_info()],
+            &self.magic_context,
+            &self.magic_program,
+        )?;
+        Ok(())
+    }
+}
