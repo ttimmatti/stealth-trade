@@ -39,7 +39,6 @@ pub struct AddLiquidity<'info> {
     pub mint_a: InterfaceAccount<'info, Mint>,
     pub mint_b: InterfaceAccount<'info, Mint>,
     #[account(
-        mut,
         seeds = [LP_MINT_SEED, lp.key().as_ref()],
         bump = lp.mint_lp_bump,
         mint::decimals = LP_DECIMALS,
