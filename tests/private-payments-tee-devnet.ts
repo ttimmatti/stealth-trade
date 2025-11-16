@@ -1,13 +1,12 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { PrivatePayments } from "../target/types/private_payments";
+import { PrivateDex } from "../target/types/private_dex";
+import privateDexIdl from "../target/idl/private_dex.json";
 import {
   groupPdaFromId,
   PERMISSION_PROGRAM_ID,
   permissionPdaFromAccount,
 } from "@magicblock-labs/ephemeral-rollups-sdk/privacy";
-import { DEPOSIT_PDA_SEED, VAULT_PDA_SEED } from "../frontend/lib/constants";
-import privatePaymentsIdl from "../target/idl/private_payments.json";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotent,
@@ -29,28 +28,44 @@ import { readFileSync } from "fs";
 import { SessionTokenManager } from "@magicblock-labs/gum-sdk";
 import { DEVNET_RPC_URL } from "./config";
 import { getAuthToken } from "./tee-getAuthToken";
+import { ER_VALIDATOR_ID, DELEGATE_PROGRAM_ID, LIQUIDITY_POOL_SEED, USER_SEED, CONFIG_SEED, LP_MINT_SEED } from "./test-utils";
 
 const DEVNET_EPHEMERAL_TEE_URL = "https://tee.magicblock.app/";
 
-// localnet validator
+// tee validator
 const TEE_DEVNET_VALIDATOR = new PublicKey(
   "FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA"
 );
+// localnet validator
+const LOCALNET_ER_VALIDATOR = new PublicKey(
+  "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev"
+);
+
+const isLocalnet = true;
+const erValidator = isLocalnet ? LOCALNET_ER_VALIDATOR : TEE_DEVNET_VALIDATOR;
 
 // static keys for users for easier debuggin
+const adminSecretKey = readFileSync("tmp/admin.json");
 const userSecretKey = readFileSync("tmp/devnet-user.json");
 const otherUserSecretKey = readFileSync("tmp/devnet-otherUser.json");
-const mintSecretKey = readFileSync("tmp/devnet-mint.json");
+const mintASecretKey = readFileSync("tmp/devnet-mint-a.json");
+const mintBSecretKey = readFileSync("tmp/devnet-mint-b.json");
 const groupSecretKey = readFileSync("tmp/devnet-group.json");
 const otherGroupSecretKey = readFileSync("tmp/devnet-otherGroup.json");
+const adminKp = Keypair.fromSecretKey(
+  new Uint8Array(JSON.parse(adminSecretKey.toString()))
+);
 const userKp = Keypair.fromSecretKey(
   new Uint8Array(JSON.parse(userSecretKey.toString()))
 );
 const otherUserKp = Keypair.fromSecretKey(
   new Uint8Array(JSON.parse(otherUserSecretKey.toString()))
 );
-const mintKp = Keypair.fromSecretKey(
-  new Uint8Array(JSON.parse(mintSecretKey.toString()))
+const mintAKp = Keypair.fromSecretKey(
+  new Uint8Array(JSON.parse(mintASecretKey.toString()))
+);
+const mintBKp = Keypair.fromSecretKey(
+  new Uint8Array(JSON.parse(mintBSecretKey.toString()))
 );
 const groupKp = Keypair.fromSecretKey(
   new Uint8Array(JSON.parse(groupSecretKey.toString()))
@@ -59,11 +74,13 @@ const otherGroupKp = Keypair.fromSecretKey(
   new Uint8Array(JSON.parse(otherGroupSecretKey.toString()))
 );
 
-describe("private-payments-tee-devnet", () => {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe("private-dex-tee-devnet", () => {
   const wallet = new anchor.Wallet(userKp);
 
   const provider = new anchor.AnchorProvider(
-    new anchor.web3.Connection(DEVNET_RPC_URL, {
+    new anchor.web3.Connection(isLocalnet ? "http://localhost:8899" : DEVNET_RPC_URL, {
       commitment: "confirmed",
     }),
     wallet
@@ -71,31 +88,46 @@ describe("private-payments-tee-devnet", () => {
   let ephemeralProvider: anchor.AnchorProvider;
   anchor.setProvider(provider);
 
-  const program = new Program<PrivatePayments>(privatePaymentsIdl, provider);
-  let ephemeralProgram: Program<PrivatePayments>;
+  const program = new Program<PrivateDex>(privateDexIdl, provider);
+  let ephemeralProgram: Program<PrivateDex>;
 
   const user = userKp.publicKey;
   const otherUser = otherUserKp.publicKey;
-  let tokenMint: PublicKey,
-    userTokenAccount: PublicKey,
-    otherUserTokenAccount: PublicKey,
-    vaultPda: PublicKey,
-    vaultTokenAccount: PublicKey;
-  const initialAmount = 1000000;
+  let tokenMintA: PublicKey,
+    tokenMintB: PublicKey,
+    lpMint: PublicKey,
+    userTokenAAccount: PublicKey,
+    userTokenBAccount: PublicKey,
+    userLPAccount: PublicKey,
+    otherUserTokenAAccount: PublicKey,
+    otherUserTokenBAccount: PublicKey,
+    vaultAAccount: PublicKey,
+    vaultBAccount: PublicKey,
+    vaultLPAccount: PublicKey;
+  const initialAmount = 10_000_000;
   const groupId = groupKp.publicKey;
   const otherGroupId = otherGroupKp.publicKey;
-  let depositPda: PublicKey, otherDepositPda: PublicKey;
+  let configPda: PublicKey;
+  let userPda: PublicKey, otherUserPda: PublicKey;
+  let vaultA: PublicKey, vaultB: PublicKey, vaultLP: PublicKey
+  let lpPda: PublicKey;
   let sessionKp: Keypair, sessionToken: PublicKey;
   let otherSessionKp: Keypair, otherSessionToken: PublicKey;
+  let userTeeProvider: anchor.AnchorProvider, otherUserTeeProvider: anchor.AnchorProvider;
+  let userTeeProgram: Program<PrivateDex>, otherUserTeeProgram: Program<PrivateDex>;
 
   const sessionManager = new SessionTokenManager(wallet, provider.connection);
 
   before(async () => {
     ephemeralProvider = await getPrivateRollupProvider(wallet);
-    ephemeralProgram = new Program<PrivatePayments>(
-      privatePaymentsIdl,
+    ephemeralProgram = new Program<PrivateDex>(
+      privateDexIdl,
       ephemeralProvider
     );
+    userTeeProvider = await getPrivateRollupProvider(new anchor.Wallet(userKp));
+    otherUserTeeProvider = await getPrivateRollupProvider(new anchor.Wallet(otherUserKp));
+    userTeeProgram = new Program<PrivateDex>(privateDexIdl, userTeeProvider);
+    otherUserTeeProgram = new Program<PrivateDex>(privateDexIdl, otherUserTeeProvider);
 
     const faucet = anchor.Wallet.local();
 
@@ -130,105 +162,138 @@ describe("private-payments-tee-devnet", () => {
     }
     if (balance === 0) throw new Error("airdrop failed...");
 
-    tokenMint = mintKp.publicKey;
-    if ((await provider.connection.getAccountInfo(tokenMint)) === null) {
+    tokenMintA = mintAKp.publicKey;
+    if ((await provider.connection.getAccountInfo(tokenMintA)) === null) {
       console.log("Creating mint...");
-      tokenMint = await createMint(
+      tokenMintA = await createMint(
         provider.connection,
         userKp,
         user,
         null,
         6,
-        mintKp,
+        mintAKp,
         undefined,
         TOKEN_PROGRAM_ID
       );
     }
 
-    while ((await provider.connection.getAccountInfo(tokenMint)) === null) {
+    tokenMintB = mintBKp.publicKey;
+    if ((await provider.connection.getAccountInfo(tokenMintB)) === null) {
+      console.log("Creating mint...");
+      tokenMintB = await createMint(
+        provider.connection,
+        userKp,
+        user,
+        null,
+        6,
+        mintBKp,
+        undefined,
+        TOKEN_PROGRAM_ID
+      );
+    }
+
+    while ((await provider.connection.getAccountInfo(tokenMintA)) === null || (await provider.connection.getAccountInfo(tokenMintB)) === null) {
       console.log("Waiting for mint to be created...");
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
-    depositPda = PublicKey.findProgramAddressSync(
-      [Buffer.from(DEPOSIT_PDA_SEED), user.toBuffer(), tokenMint.toBuffer()],
+    configPda = PublicKey.findProgramAddressSync(
+      [CONFIG_SEED],
       program.programId
     )[0];
-    otherDepositPda = PublicKey.findProgramAddressSync(
+    userPda = PublicKey.findProgramAddressSync(
+      [USER_SEED, user.toBuffer()],
+      program.programId
+    )[0];
+    otherUserPda = PublicKey.findProgramAddressSync(
       [
-        Buffer.from(DEPOSIT_PDA_SEED),
+        USER_SEED,
         otherUser.toBuffer(),
-        tokenMint.toBuffer(),
       ],
       program.programId
     )[0];
-    vaultPda = PublicKey.findProgramAddressSync(
-      [Buffer.from(VAULT_PDA_SEED), tokenMint.toBuffer()],
+    lpPda = PublicKey.findProgramAddressSync(
+      [LIQUIDITY_POOL_SEED, tokenMintA.toBuffer(), tokenMintB.toBuffer()],
       program.programId
     )[0];
-    vaultTokenAccount = getAssociatedTokenAddressSync(
-      tokenMint,
-      vaultPda,
+    lpMint = PublicKey.findProgramAddressSync(
+      [LP_MINT_SEED, lpPda.toBuffer()],
+      program.programId
+    )[0];
+    vaultAAccount = getAssociatedTokenAddressSync(
+      tokenMintA,
+      configPda,
+      true,
+      TOKEN_PROGRAM_ID
+    );
+    vaultBAccount = getAssociatedTokenAddressSync(
+      tokenMintB,
+      configPda,
+      true,
+      TOKEN_PROGRAM_ID
+    );
+    vaultLPAccount = getAssociatedTokenAddressSync(
+      lpMint,
+      configPda,
       true,
       TOKEN_PROGRAM_ID
     );
 
-    userTokenAccount = getAssociatedTokenAddressSync(
-      tokenMint,
-      user,
+    userTokenAAccount = getAssociatedTokenAddressSync(
+      tokenMintA,
+      userKp.publicKey,
       false,
       TOKEN_PROGRAM_ID
     );
-    if ((await provider.connection.getAccountInfo(userTokenAccount)) === null) {
-      console.log("Creating user token account...");
-      userTokenAccount = await createAssociatedTokenAccountIdempotent(
-        provider.connection,
-        userKp,
-        tokenMint,
-        user,
-        undefined,
-        TOKEN_PROGRAM_ID
-      );
-    }
-
-    otherUserTokenAccount = getAssociatedTokenAddressSync(
-      tokenMint,
-      otherUser,
+    userTokenBAccount = getAssociatedTokenAddressSync(
+      tokenMintB,
+      userKp.publicKey,
       false,
       TOKEN_PROGRAM_ID
     );
-    if (
-      (await provider.connection.getAccountInfo(otherUserTokenAccount)) === null
-    ) {
-      console.log("Creating other user token account...");
-      otherUserTokenAccount = await createAssociatedTokenAccountIdempotent(
-        provider.connection,
-        otherUserKp,
-        tokenMint,
-        otherUser,
-        undefined,
-        TOKEN_PROGRAM_ID
-      );
-    }
-
-    while (
-      (await provider.connection.getAccountInfo(userTokenAccount)) === null
-    ) {
-      console.log("Waiting for user token account to be created...");
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    userLPAccount = getAssociatedTokenAddressSync(
+      lpMint,
+      userKp.publicKey,
+      false,
+      TOKEN_PROGRAM_ID
+    );
+    for (const [kp, mint, ata] of [
+      [userKp, tokenMintA, userTokenAAccount],
+      [userKp, tokenMintB, userTokenBAccount],
+      // [userKp, lpMint, userLPAccount],
+      // [otherUserKp, tokenMintA, otherUserTokenAAccount],
+      // [otherUserKp, tokenMintB, otherUserTokenBAccount],
+    ]) {
+      if ((await provider.connection.getAccountInfo(ata as PublicKey)) === null) {
+        console.log("Creating user token account...");
+        await createAssociatedTokenAccountIdempotent(
+          provider.connection,
+          kp as Keypair,
+          mint as PublicKey,
+          (kp as Keypair).publicKey,
+          undefined,
+          TOKEN_PROGRAM_ID
+        );
+      }
+      while (
+        (await provider.connection.getAccountInfo(ata as PublicKey)) === null
+      ) {
+        console.log("Waiting for token account to be created...");
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
     }
 
     // Mint tokens to the user
-    const userAta = await provider.connection.getTokenAccountBalance(
-      userTokenAccount
+    let userTokenAAta = await provider.connection.getTokenAccountBalance(
+      userTokenAAccount
     );
-    if (userAta.value.uiAmount === 0) {
-      console.log("Minting tokens to user...");
+    if (Number(userTokenAAta.value.amount) < 5_000_000) {
+      console.log("Minting tokens A to user...");
       await mintToChecked(
         provider.connection,
         userKp,
-        tokenMint,
-        userTokenAccount,
+        tokenMintA,
+        userTokenAAccount,
         user,
         new anchor.BN(initialAmount) as any,
         6,
@@ -238,126 +303,270 @@ describe("private-payments-tee-devnet", () => {
       );
     }
 
-    console.log("User token account", userTokenAccount.toBase58());
-    console.log("Vault token account", vaultTokenAccount.toBase58());
-    console.log("Deposit PDA", depositPda.toBase58());
-    console.log("Other deposit PDA", otherDepositPda.toBase58());
-    console.log("User", user.toBase58());
-    console.log("Other user", otherUser.toBase58());
-    console.log("Token mint", tokenMint.toBase58());
-    console.log("Group ID", groupId.toBase58());
-    console.log("Other group ID", otherGroupId.toBase58());
+    let userTokenBAta = await provider.connection.getTokenAccountBalance(
+      userTokenBAccount
+    );
+    if (Number(userTokenBAta.value.amount) < 5_000_000) {
+      console.log("Minting tokens B to user...");
+      await mintToChecked(
+        provider.connection,
+        userKp,
+        tokenMintB,
+        userTokenBAccount,
+        user,
+        new anchor.BN(initialAmount) as any,
+        6,
+        undefined,
+        undefined,
+        TOKEN_PROGRAM_ID
+      );
+    }
+
+    console.log("User token A account", userTokenAAccount.toBase58());
+    console.log("User token B account", userTokenBAccount.toBase58());
+    console.log("User LP account", userLPAccount.toBase58());
+    console.log("Vault A account", vaultAAccount.toBase58());
+    console.log("Vault B account", vaultBAccount.toBase58());
+    console.log("Vault LP account", vaultLPAccount.toBase58());
+    console.log("LP PDA", lpPda.toBase58());
+    console.log("User PDA", userPda.toBase58());
+    console.log("Other user PDA", otherUserPda.toBase58());
+    console.log("Token mint A", tokenMintA.toBase58());
+    console.log("Token mint B", tokenMintB.toBase58());
+    console.log("LP mint", lpMint.toBase58());
   });
 
-  it("Initialize deposits", async () => {
+  it("Initialize config", async () => {
+    if ((await provider.connection.getAccountInfo(configPda)) === null) {
+      let sig = await program.methods
+        .initialize()
+        .accountsStrict({
+          sender: adminKp.publicKey,
+          config: configPda,
+          delegateProgram: DELEGATE_PROGRAM_ID,
+          erValidator: isLocalnet ? LOCALNET_ER_VALIDATOR : TEE_DEVNET_VALIDATOR,
+          permissionProgram: PERMISSION_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([adminKp])
+        .rpc();
+      await provider.connection.confirmTransaction(sig);
+      console.log("Sig initialize config", sig);
+    } else {
+      console.log("Config already initialized");
+    }
+  });
+
+  it("Initialize users", async () => {
+    if ((await provider.connection.getAccountInfo(userPda)) !== null) {
+      console.log("Users already initialized");
+      return;
+    }
+
     let sig = await program.methods
-      .initializeDeposit()
+      .createUser()
       .accountsStrict({
-        payer: user,
-        user,
-        deposit: depositPda,
-        tokenMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        sender: user,
+        user: userPda,
+        config: configPda,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
     await provider.connection.confirmTransaction(sig);
-    console.log("Sig", sig);
+    console.log("Sig create user", sig);
 
-    let deposit = await program.account.deposit.fetch(depositPda);
-    assert.equal(deposit.amount.toNumber(), 0);
+    let userAccount = await program.account.user.fetch(userPda);
+    assert.equal(userAccount.authority.toBase58(), user.toBase58());
 
     sig = await program.methods
-      .initializeDeposit()
+      .createUser()
       .accountsStrict({
-        payer: otherUser,
-        user: otherUser,
-        deposit: otherDepositPda,
-        tokenMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        sender: otherUser,
+        user: otherUserPda,
+        config: configPda,
         systemProgram: SystemProgram.programId,
       })
       .signers([otherUserKp])
       .rpc();
     await provider.connection.confirmTransaction(sig);
-    console.log("Sig", sig);
+    console.log("Sig create other user", sig);
 
-    deposit = await program.account.deposit.fetch(otherDepositPda);
-    assert.equal(deposit.amount.toNumber(), 0);
+    userAccount = await program.account.user.fetch(otherUserPda);
+    assert.equal(userAccount.authority.toBase58(), otherUser.toBase58());
   });
 
-  it("Modify balance", async () => {
+  // deposits
+  it("Deposit", async () => {
+    const userBefore = await program.account.user.fetch(userPda);
+    let mintAPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    if (mintAPositionBefore === undefined) {
+      mintAPositionBefore = userBefore.positions[userBefore.positions.length - 1];
+    }
+
     let sig = await program.methods
-      .modifyBalance({
-        amount: new anchor.BN(initialAmount / 2),
-        increase: true,
-      })
+      .deposit(new anchor.BN(5_000_000))
       .accountsStrict({
-        user,
-        payer: user,
-        deposit: depositPda,
-        userTokenAccount,
-        vault: vaultPda,
-        vaultTokenAccount,
-        tokenMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        sender: user,
+        config: configPda,
+        user: userPda,
+        senderAta: userTokenAAccount,
+        vault: vaultAAccount,
+        mint: tokenMintA,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
     await provider.connection.confirmTransaction(sig);
-    console.log("Sig", sig);
+    console.log("Sig deposit", sig);
 
-    let deposit = await program.account.deposit.fetch(depositPda);
-    assert.equal(deposit.amount.toNumber(), initialAmount / 2);
+    const userDeposit = await program.account.user.fetch(userPda);
+    const mintAPositionAfter = userDeposit.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    assert.equal(mintAPositionAfter.amount.toNumber(), mintAPositionBefore.amount.toNumber() + 5_000_000);
+
+    let mintBPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === tokenMintB.toBase58());
+    if (mintBPositionBefore === undefined) {
+      mintBPositionBefore = userBefore.positions[userBefore.positions.length - 1];
+    }
 
     sig = await program.methods
-      .modifyBalance({
-        amount: new anchor.BN(initialAmount / 4),
-        increase: false,
-      })
+      .deposit(new anchor.BN(5_000_000))
       .accountsStrict({
-        user,
-        payer: user,
-        deposit: depositPda,
-        userTokenAccount,
-        vault: vaultPda,
-        vaultTokenAccount,
-        tokenMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        sender: user,
+        config: configPda,
+        user: userPda,
+        senderAta: userTokenBAccount,
+        vault: vaultBAccount,
+        mint: tokenMintB,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
     await provider.connection.confirmTransaction(sig);
-    console.log("Sig", sig);
+    console.log("Sig deposit B", sig);
 
-    deposit = await program.account.deposit.fetch(depositPda);
-    assert.equal(deposit.amount.toNumber(), initialAmount / 4);
+    const userAfter = await program.account.user.fetch(userPda);
+    const mintBPositionAfter = userAfter.positions.find(p => p.mint.toBase58() === tokenMintB.toBase58());
+    assert.equal(mintBPositionAfter.amount.toNumber(), mintBPositionBefore.amount.toNumber() + 5_000_000);
+  });
 
-    sig = await program.methods
-      .modifyBalance({
-        amount: new anchor.BN((3 * initialAmount) / 4),
-        increase: true,
-      })
-      .accountsStrict({
-        user,
-        payer: user,
-        deposit: depositPda,
-        userTokenAccount,
-        vault: vaultPda,
-        vaultTokenAccount,
-        tokenMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+  // create lp
+  it("Create LP", async () => {
+    if ((await provider.connection.getAccountInfo(lpPda)) !== null) {
+      console.log("LP already created");
+      return;
+    }
+
+    let sig = await program.methods
+      .createLp()
+      .accountsPartial({
+        sender: user,
+        config: configPda,
+        mintA: tokenMintA,
+        mintB: tokenMintB,
+        lp: lpPda,
+        mintLp: lpMint,
+        vaultA: vaultAAccount,
+        vaultB: vaultBAccount,
+        vaultLp: vaultLPAccount,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc({ skipPreflight: true });
+    await provider.connection.confirmTransaction(sig);
+    console.log("Sig create LP", sig);
+
+    const lp = await program.account.liquidityPool.fetch(lpPda);
+    assert.equal(lp.mintA.toBase58(), tokenMintA.toBase58());
+    assert.equal(lp.mintB.toBase58(), tokenMintB.toBase58());
+    assert.equal(lp.lpMint.toBase58(), lpMint.toBase58());
+    assert.equal(lp.vaultA.toBase58(), vaultAAccount.toBase58());
+    assert.equal(lp.vaultB.toBase58(), vaultBAccount.toBase58());
+  });
+
+  // add lp
+  it("Add Liquidity", async () => {
+    const userBefore = await program.account.user.fetch(userPda);
+    let mintAPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    if (!mintAPositionBefore) {
+      throw new Error("Mint A position not found");
+    }
+    let mintBPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === tokenMintB.toBase58());
+    if (!mintBPositionBefore) {
+      throw new Error("Mint B position not found");
+    }
+    let lpMintPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === lpMint.toBase58());
+    if (lpMintPositionBefore === undefined) {
+      lpMintPositionBefore = userBefore.positions[userBefore.positions.length - 1];
+    }
+
+    const lpBefore = await program.account.liquidityPool.fetch(lpPda);
+
+    let sig = await program.methods
+      .addLiquidity(new anchor.BN(500_000), new anchor.BN(500_000), new anchor.BN(500_000))
+      .accountsStrict({
+        sender: user,
+        user: userPda,
+        config: configPda,
+        mintA: tokenMintA,
+        mintB: tokenMintB,
+        lp: lpPda,
+        mintLp: lpMint,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
     await provider.connection.confirmTransaction(sig);
-    console.log("Sig", sig);
+    console.log("Sig add liquidity", sig);
 
-    deposit = await program.account.deposit.fetch(depositPda);
-    assert.equal(deposit.amount.toNumber(), initialAmount);
+    const userAfter = await program.account.user.fetch(userPda);
+    const mintAPositionAfter = userAfter.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    assert.equal(mintAPositionAfter.amount.toNumber(), mintAPositionBefore.amount.toNumber() - 500_000);
+    const mintBPositionAfter = userAfter.positions.find(p => p.mint.toBase58() === tokenMintB.toBase58());
+    assert.equal(mintBPositionAfter.amount.toNumber(), mintBPositionBefore.amount.toNumber() - 500_000);
+    const lpMintPositionAfter = userAfter.positions.find(p => p.mint.toBase58() === lpMint.toBase58());
+    assert.equal(lpMintPositionAfter.amount.toNumber(), lpMintPositionBefore.amount.toNumber() + 500_000);
+
+    const lpAfter = await program.account.liquidityPool.fetch(lpPda);
+    assert.equal(lpAfter.virtualReserveA.toNumber(), lpBefore.virtualReserveA.toNumber() + 500_000);
+    assert.equal(lpAfter.virtualReserveB.toNumber(), lpBefore.virtualReserveB.toNumber() + 500_000);
+    assert.equal(lpAfter.lpSupply.toNumber(), lpBefore.lpSupply.toNumber() + 500_000);
+  });
+
+  it("Create User Permission", async () => {
+    for (const { userAccount, kp, id } of [
+      { userAccount: userPda, kp: userKp, id: groupId },
+      { userAccount: otherUserPda, kp: otherUserKp, id: otherGroupId },
+    ]) {
+      const permission = permissionPdaFromAccount(userAccount);
+      console.log("Permission", permission.toBase58());
+      const group = groupPdaFromId(id);
+      console.log("Group", group.toBase58());
+
+      if ((await provider.connection.getAccountInfo(permission)) !== null) {
+        console.log("Permission already created");
+        continue;
+      }
+
+      const sig = await program.methods
+        .createUserPermission(id)
+        .accountsStrict({
+          payer: kp.publicKey,
+          user: kp.publicKey,
+          userAccount,
+          permission,
+          group,
+          permissionProgram: PERMISSION_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([kp])
+        .rpc();
+      await provider.connection.confirmTransaction(sig);
+      console.log("Sig create permission", sig);
+    }
   });
 
   it("Create session", async () => {
@@ -419,221 +628,296 @@ describe("private-payments-tee-devnet", () => {
     console.log("Other session", otherSession);
   });
 
-  it("Create permission", async () => {
-    for (const { deposit, kp, id } of [
-      { deposit: depositPda, kp: userKp, id: groupId },
-      { deposit: otherDepositPda, kp: otherUserKp, id: otherGroupId },
+  // delegate users
+  it("Delegate Users", async () => {
+    for (const { userAccount, kp } of [
+      { userAccount: userPda, kp: userKp },
+      { userAccount: otherUserPda, kp: otherUserKp },
     ]) {
-      const permission = permissionPdaFromAccount(deposit);
-      console.log("Permission", permission.toBase58());
-      const group = groupPdaFromId(id);
-      console.log("Group", group.toBase58());
+      console.log("Delegating account", userAccount.toBase58());
 
       const sig = await program.methods
-        .createPermission(id)
-        .accountsStrict({
-          payer: kp.publicKey,
-          user: kp.publicKey,
-          deposit,
-          permission,
-          group,
-          permissionProgram: PERMISSION_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
-        })
-        .signers([kp])
-        .rpc();
-      await provider.connection.confirmTransaction(sig);
-      console.log("Sig create permission", sig);
-    }
-  });
-
-  it("Delegate", async () => {
-    for (const { deposit, kp } of [
-      { deposit: depositPda, kp: userKp },
-      { deposit: otherDepositPda, kp: otherUserKp },
-    ]) {
-      console.log("Delegating account", deposit.toBase58());
-
-      const sig = await program.methods
-        .delegate(kp.publicKey, tokenMint)
+        .delegateUser(kp.publicKey)
         .accountsPartial({
           payer: kp.publicKey,
-          deposit,
-          validator: TEE_DEVNET_VALIDATOR,
+          userAccount,
+          validator: erValidator,
         })
         .signers([kp])
         .rpc();
-      console.log("Sig", sig);
+      console.log("Sig delegate user", sig);
       await provider.connection.confirmTransaction(sig);
 
-      console.log("Delegated account", deposit.toBase58());
+      console.log("Delegated account", userAccount.toBase58());
     }
   });
 
+  // delegate lp
+  it("Delegate LP", async () => {
+    console.log("Delegating account", lpPda.toBase58());
+
+    const sig = await program.methods
+      .delegateLp(tokenMintA, tokenMintB)
+      .accountsPartial({
+        payer: user,
+        config: configPda,
+        lpAccount: lpPda,
+        validator: erValidator,
+      })
+      .rpc();
+    console.log("Sig delegate lp", sig);
+    await provider.connection.confirmTransaction(sig);
+  });
+
+  // private transfer
+  // TODO: add session token
   it("Transfer", async () => {
-    // Used to force fetching accounts from the base validator
+    // Used to force fetching accounts from the base validator for localnet
     try {
-      await ephemeralProvider.connection.requestAirdrop(depositPda, 1000);
+      await ephemeralProvider.connection.requestAirdrop(userPda, 1000);
     } catch (error) {
       console.error(error);
       // fails to airdrop but loads the accounts into the er
       // console.log("Error airdropping deposit PDA", error);
     }
     try {
-      await ephemeralProvider.connection.requestAirdrop(otherDepositPda, 1000);
+      await ephemeralProvider.connection.requestAirdrop(otherUserPda, 1000);
     } catch (error) {
       // fails to airdrop but loads the accounts into the er
       // console.log("Error airdropping other deposit PDA", error);
     }
 
-    const depositBefore = await ephemeralProgram.account.deposit.fetch(
-      depositPda
+    const userBefore = await userTeeProgram.account.user.fetch(
+      userPda
     );
-    console.log("Deposit before", depositBefore.amount.toNumber());
+    const mintAPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    if (!mintAPositionBefore) {
+      throw new Error("Mint A position not found");
+    }
 
-    const otherDepositBefore = await ephemeralProgram.account.deposit.fetch(
-      otherDepositPda
+    const otherUserBefore = await otherUserTeeProgram.account.user.fetch(
+      otherUserPda
     );
-    console.log("Other deposit before", otherDepositBefore.amount.toNumber());
+    console.log("Other user before", otherUserBefore);
+    let otherMintAPositionBefore = otherUserBefore.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    if (otherMintAPositionBefore === undefined) {
+      otherMintAPositionBefore = otherUserBefore.positions[otherUserBefore.positions.length - 1];
+    }
 
     const sig = await ephemeralProgram.methods
-      .transferDeposit(new anchor.BN(initialAmount / 2))
+      .transfer(new anchor.BN(100_000))
       .accountsStrict({
-        user,
-        payer: sessionKp.publicKey,
-        sourceDeposit: depositPda,
-        destinationDeposit: otherDepositPda,
-        tokenMint,
+        sender: user,
+        user: userPda,
+        destinationUser: otherUserPda,
+        config: configPda,
+        mint: tokenMintA,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
-        sessionToken,
       })
-      .signers([sessionKp])
+      .signers([userKp])
       .rpc();
-    console.log("Sig", sig);
+    console.log("Sig transfer", sig);
     await ephemeralProvider.connection.confirmTransaction(sig);
 
-    const userDepositAfter = await ephemeralProgram.account.deposit.fetch(
-      depositPda
+    const userAfter = await userTeeProgram.account.user.fetch(
+      userPda
     );
-    console.log("Deposit after", userDepositAfter.amount.toNumber());
-    assert.equal(userDepositAfter.amount.toNumber(), initialAmount / 2);
+    const mintAPositionAfter = userAfter.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    assert.equal(mintAPositionAfter.amount.toNumber(), mintAPositionBefore.amount.toNumber() - 100_000);
 
-    const otherDepositAfter = await ephemeralProgram.account.deposit.fetch(
-      otherDepositPda
+    const otherUserAfter = await otherUserTeeProgram.account.user.fetch(
+      otherUserPda
     );
-    console.log("Other deposit after", otherDepositAfter.amount.toNumber());
-    assert.equal(otherDepositAfter.amount.toNumber(), initialAmount / 2);
-
-    console.log("Other deposit PDA transfered", otherDepositPda.toBase58());
+    console.log("Other user after", otherUserAfter);
+    const otherMintAPositionAfter = otherUserAfter.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    assert.equal(otherMintAPositionAfter.amount.toNumber(), otherMintAPositionBefore.amount.toNumber() + 100_000);
   });
 
-  it("Undelegate Deposits", async () => {
-    for (const { deposit, kp, session, sessionKey } of [
+  // add liquidity in ER
+  // TODO: add session token
+  it("Add Liquidity in ER", async () => {
+    // Used to force fetching accounts from the base validator for localnet
+    try {
+      await ephemeralProvider.connection.requestAirdrop(lpPda, 1000);
+    } catch (error) {
+      // fails to airdrop but loads the accounts into the er
+      // console.log("Error airdropping other deposit PDA", error);
+    }
+
+    const userBefore = await userTeeProgram.account.user.fetch(userPda);
+    let mintAPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    if (!mintAPositionBefore) {
+      throw new Error("Mint A position not found");
+    }
+    let mintBPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === tokenMintB.toBase58());
+    if (!mintBPositionBefore) {
+      throw new Error("Mint B position not found");
+    }
+    let lpMintPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === lpMint.toBase58());
+    if (lpMintPositionBefore === undefined) {
+      lpMintPositionBefore = userBefore.positions[userBefore.positions.length - 1];
+    }
+
+    const lpBefore = await userTeeProgram.account.liquidityPool.fetch(lpPda);
+
+    let sig = await ephemeralProgram.methods
+      .addLiquidity(new anchor.BN(100_000), new anchor.BN(100_000), new anchor.BN(100_000))
+      .accountsStrict({
+        sender: user,
+        user: userPda,
+        config: configPda,
+        mintA: tokenMintA,
+        mintB: tokenMintB,
+        lp: lpPda,
+        mintLp: lpMint,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+    await ephemeralProvider.connection.confirmTransaction(sig);
+    console.log("Sig add liquidity in ER", sig);
+
+    const userAfter = await userTeeProgram.account.user.fetch(userPda);
+    const mintAPositionAfter = userAfter.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    assert.equal(mintAPositionAfter.amount.toNumber(), mintAPositionBefore.amount.toNumber() - 100_000);
+    const mintBPositionAfter = userAfter.positions.find(p => p.mint.toBase58() === tokenMintB.toBase58());
+    assert.equal(mintBPositionAfter.amount.toNumber(), mintBPositionBefore.amount.toNumber() - 100_000);
+    const lpMintPositionAfter = userAfter.positions.find(p => p.mint.toBase58() === lpMint.toBase58());
+    assert.equal(lpMintPositionAfter.amount.toNumber(), lpMintPositionBefore.amount.toNumber() + 100_000);
+
+    const lpAfter = await ephemeralProgram.account.liquidityPool.fetch(lpPda);
+    assert.equal(lpAfter.virtualReserveA.toNumber(), lpBefore.virtualReserveA.toNumber() + 100_000);
+    assert.equal(lpAfter.virtualReserveB.toNumber(), lpBefore.virtualReserveB.toNumber() + 100_000);
+    assert.equal(lpAfter.lpSupply.toNumber(), lpBefore.lpSupply.toNumber() + 100_000);
+  });
+
+  // private swap
+  // TODO: add session token
+  it("Swap", async () => {
+    const userBefore = await userTeeProgram.account.user.fetch(
+      userPda
+    );
+    const mintAPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    if (!mintAPositionBefore) {
+      throw new Error("Mint A position not found");
+    }
+    let mintBPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === tokenMintB.toBase58());
+    if (mintBPositionBefore === undefined) {
+      mintBPositionBefore = userBefore.positions[userBefore.positions.length - 1];
+    }
+
+    const sig = await ephemeralProgram.methods
+      .swap(true, new anchor.BN(20_000), new anchor.BN(15_000))
+      .accountsStrict({
+        sender: user,
+        user: userPda,
+        lp: lpPda,
+        config: configPda,
+        mintA: tokenMintA,
+        mintB: tokenMintB,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([userKp])
+      .rpc();
+    console.log("Sig swap", sig);
+    await ephemeralProvider.connection.confirmTransaction(sig);
+
+    const userAfter = await userTeeProgram.account.user.fetch(
+      userPda
+    );
+    const mintAPositionAfter = userAfter.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    assert.equal(mintAPositionAfter.amount.toNumber(), mintAPositionBefore.amount.toNumber() - 20_000);
+
+    const mintBPositionAfter = userAfter.positions.find(p => p.mint.toBase58() === tokenMintB.toBase58());
+    assert.approximately(mintBPositionAfter.amount.toNumber(), mintBPositionBefore.amount.toNumber() + 20_000, 5_000);
+  });
+
+  it("Undelegate Users", async () => {
+    for (const { userAccount, kp, session, sessionKey } of [
       {
-        deposit: depositPda,
+        userAccount: userPda,
         kp: userKp,
         session: sessionToken,
         sessionKey: sessionKp,
       },
       {
-        deposit: otherDepositPda,
+        userAccount: otherUserPda,
         kp: otherUserKp,
         session: otherSessionToken,
         sessionKey: otherSessionKp,
       },
     ]) {
-      console.log("Undelegating account", deposit.toBase58());
+      console.log("Undelegating account", userAccount.toBase58());
 
       const sig = await ephemeralProgram.methods
-        .undelegate()
+        .commitAndUndelegateUser()
         .accountsPartial({
-          payer: sessionKey.publicKey,
+          payer: kp.publicKey,
           user: kp.publicKey,
-          sessionToken: session,
-          deposit,
+          sessionToken: null,
+          userAccount,
         })
-        .signers([sessionKey])
+        .signers([kp])
         .rpc();
       console.log("Sig undelegate", sig);
       await ephemeralProvider.connection.confirmTransaction(sig, "finalized");
 
-      console.log("Undelegated account", deposit.toBase58());
+      while (!(await provider.connection.getAccountInfo(userAccount))?.owner.equals(program.programId)) {
+        console.log("Waiting for account to be undelegated...");
+        await sleep(1000);
+      }
+
+      console.log("Account undelegated", userAccount.toBase58());
     }
   });
 
-  it("Withdraw from deposit", async () => {
-    const depositBefore = await program.account.deposit.fetch(depositPda);
-    console.log("Deposit before", depositBefore.amount.toNumber());
+  it("Withdraw from user account", async () => {
+    const userAccountInfo = await provider.connection.getAccountInfo(userPda);
+    if (userAccountInfo === null) {
+      throw new Error("User account not found");
+    }
+    if (userAccountInfo?.owner.equals(DELEGATE_PROGRAM_ID)) {
+      throw new Error("User account is delegated");
+    }
+
+    const userBefore = await userTeeProgram.account.user.fetch(userPda);
+    const mintAPositionBefore = userBefore.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    if (!mintAPositionBefore) {
+      throw new Error("Mint A position not found");
+    }
+
+    const userTokenABalanceBefore = await provider.connection.getTokenAccountBalance(userTokenAAccount);
 
     // Wait for the undelegation to be complete
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
     let sig = await program.methods
-      .modifyBalance({
-        amount: new anchor.BN(initialAmount / 2),
-        increase: false,
-      })
+      .withdraw(new anchor.BN(120_000))
       .accountsStrict({
-        user,
-        payer: user,
-        deposit: depositPda,
-        userTokenAccount,
-        vault: vaultPda,
-        vaultTokenAccount,
-        tokenMint,
+        sender: user,
+        user: userPda,
+        senderAta: userTokenAAccount,
+        vault: vaultAAccount,
+        config: configPda,
+        mint: tokenMintA,
         tokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
     await provider.connection.confirmTransaction(sig);
-    console.log("Sig", sig);
+    console.log("Sig withdraw from user", sig);
 
-    const depositAfter = await program.account.deposit.fetch(depositPda);
-    const userAfter = await getAccount(provider.connection, userTokenAccount);
-    console.log("Deposit after", depositAfter.amount.toNumber());
-    console.log("User after", userAfter.amount);
-    assert.equal(depositAfter.amount.toNumber(), 0);
-    assert.equal(Number(userAfter.amount), initialAmount / 2);
-
-    const otherDepositBefore = await program.account.deposit.fetch(
-      otherDepositPda
-    );
-    console.log("Other deposit before", otherDepositBefore.amount.toNumber());
-
-    sig = await program.methods
-      .modifyBalance({
-        amount: new anchor.BN(initialAmount / 2),
-        increase: false,
-      })
-      .accountsStrict({
-        user: otherUser,
-        payer: otherUser,
-        deposit: otherDepositPda,
-        userTokenAccount: otherUserTokenAccount,
-        vault: vaultPda,
-        vaultTokenAccount,
-        tokenMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([otherUserKp])
-      .rpc({ skipPreflight: true });
-    console.log("Sig", sig);
-    await provider.connection.confirmTransaction(sig);
-
-    const otherDepositAfter = await program.account.deposit.fetch(
-      otherDepositPda
-    );
-    const otherUserAfter = await getAccount(
-      provider.connection,
-      otherUserTokenAccount
-    );
-    console.log("Other deposit after", otherDepositAfter.amount.toNumber());
-    console.log("Other user after", otherUserAfter.amount);
-    assert.equal(otherDepositAfter.amount.toNumber(), 0);
-    assert.equal(Number(otherUserAfter.amount), initialAmount / 2);
+    const userAfter = await program.account.user.fetch(userPda);
+    const mintAPositionAfter = userAfter.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
+    assert.equal(mintAPositionAfter.amount.toNumber(), mintAPositionBefore.amount.toNumber() - 120_000);
+    const userTokenABalanceAfter = await provider.connection.getTokenAccountBalance(userTokenAAccount);
+    assert.equal(Number(userTokenABalanceAfter.value.amount), Number(userTokenABalanceBefore.value.amount) + 120_000);
   });
 
   it("Revoke session", async () => {
@@ -650,6 +934,15 @@ describe("private-payments-tee-devnet", () => {
 });
 
 async function getPrivateRollupProvider(wallet: anchor.Wallet) {
+  if (isLocalnet) {
+    return new anchor.AnchorProvider(
+      new anchor.web3.Connection("http://localhost:7799", {
+        commitment: "confirmed",
+      }),
+      wallet
+    )
+  }
+
   const token = await getAuthToken(DEVNET_EPHEMERAL_TEE_URL, wallet.payer);
   return new anchor.AnchorProvider(
     new anchor.web3.Connection(`${DEVNET_EPHEMERAL_TEE_URL}?token=${token}`, {
