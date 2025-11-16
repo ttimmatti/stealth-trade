@@ -12,6 +12,10 @@ use litesvm_token::{
 };
 use spl_associated_token_account::get_associated_token_address;
 
+// Re-export utility functions for PDA derivations
+// pub mod utils;
+// pub use utils::{get_group_pda, get_permission_pda};
+
 // Constants from the program
 pub const CONFIG_SEED: &[u8] = b"config";
 pub const USER_SEED: &[u8] = b"user";
@@ -45,6 +49,16 @@ impl TestContext {
         let program_bytes = include_bytes!("../target/deploy/private_dex.so");
 
         let mut ctx = AnchorLiteSVM::build_with_program(program_id, program_bytes);
+
+        // add permission program
+        let permission_program_bytes = include_bytes!("fixtures/permission.so");
+        let permission_program_id = PERMISSION_PROGRAM_ID;
+        ctx.svm.add_program(permission_program_id, permission_program_bytes);
+
+        // add delegate program
+        let delegate_program_bytes = include_bytes!("fixtures/dlp.so");
+        let delegate_program_id = DELEGATE_PROGRAM_ID;
+        ctx.svm.add_program(delegate_program_id, delegate_program_bytes);
         
         let admin = read_keypair_file("../tmp/admin.json").unwrap();
         ctx.svm.airdrop(&admin.pubkey(), 100_000_000_000).unwrap(); // 100 SOL
@@ -484,6 +498,128 @@ pub fn transfer(
     
     ctx.anchor_ctx.send_and_confirm_transaction(&tx)?;
     Ok(())
+}
+
+
+fn buffer_account(
+    account_pda: Pubkey,
+    program_id: Pubkey,
+) -> Pubkey {
+    Pubkey::find_program_address(&[b"buffer", account_pda.as_ref()], &program_id).0
+}
+
+fn delegation_record_account(
+    account_pda: Pubkey,
+    delegation_program_id: Pubkey,
+) -> Pubkey {
+    Pubkey::find_program_address(&[b"delegation", account_pda.as_ref()], &delegation_program_id).0
+}
+
+fn delegation_metadata_account(
+    account_pda: Pubkey,
+    delegation_program_id: Pubkey,
+) -> Pubkey {
+    Pubkey::find_program_address(&[b"delegation-metadata", account_pda.as_ref()], &delegation_program_id).0
+}
+
+/// Helper: Delegate user account to ephemeral rollups
+pub fn delegate_user(
+    ctx: &mut TestContext,
+    payer: &Keypair,
+    user: Pubkey,
+    user_pda: Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {    
+    let data = instruction::DelegateUser { user };
+    
+    // Manually construct account metas for the delegate instruction
+    let accounts = private_dex::accounts::DelegateUser {
+        payer: payer.pubkey(),
+        config: ctx.config,
+        validator: ER_VALIDATOR_ID,
+        user_account: user_pda,
+        buffer_user_account: buffer_account(user_pda, ctx.program_id),
+        delegation_record_user_account: delegation_record_account(user_pda, DELEGATE_PROGRAM_ID),
+        delegation_metadata_user_account: delegation_metadata_account(user_pda, DELEGATE_PROGRAM_ID),
+        owner_program: ctx.program_id,
+        delegation_program: DELEGATE_PROGRAM_ID,
+        system_program: system_program::ID,
+    };
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&payer.pubkey()),
+        &[payer],
+        ctx.anchor_ctx.latest_blockhash(),
+    );
+    
+    ctx.anchor_ctx.send_and_confirm_transaction(&tx)?;
+    Ok(())
+}
+
+/// Helper: Delegate LP account to ephemeral rollups
+pub fn delegate_lp(
+    ctx: &mut TestContext,
+    payer: &Keypair,
+    lp: Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {
+    
+    let data = instruction::DelegateLp {};
+    
+    // Manually construct account metas for the delegate instruction
+    let accounts = private_dex::accounts::DelegateLp {
+        payer: payer.pubkey(),
+        config: ctx.config,
+        validator: ER_VALIDATOR_ID,
+        lp_account: lp,
+        buffer_lp_account: buffer_account(lp, ctx.program_id),
+        delegation_record_lp_account: delegation_record_account(lp, DELEGATE_PROGRAM_ID),
+        delegation_metadata_lp_account: delegation_metadata_account(lp, DELEGATE_PROGRAM_ID),
+        owner_program: ctx.program_id,
+        delegation_program: DELEGATE_PROGRAM_ID,
+        system_program: system_program::ID,
+    };
+    
+    let instruction = Instruction {
+        program_id: ctx.program_id,
+        accounts: accounts.to_account_metas(None),
+        data: data.data(),
+    };
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&payer.pubkey()),
+        &[payer],
+        ctx.anchor_ctx.latest_blockhash(),
+    );
+    
+    ctx.anchor_ctx.send_and_confirm_transaction(&tx)?;
+    Ok(())
+}
+
+// ============================================================================
+// Utility Functions for PDA Derivations
+// ============================================================================
+
+/// Derives the Group PDA for a given group_id
+pub fn get_group_pda(group_id: Pubkey, permission_program_id: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"group:", group_id.as_ref()],
+        permission_program_id
+    ).0
+}
+
+/// Derives the Permission PDA for a given delegated account and group
+pub fn get_permission_pda(delegated_account: Pubkey, group: Pubkey, permission_program_id: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"permission:", delegated_account.as_ref()],
+        permission_program_id
+    ).0
 }
 
 // ============================================================================
