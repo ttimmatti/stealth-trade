@@ -1,4 +1,4 @@
-rm -r test-ledger-magicblock && \
+rm -rf test-ledger-magicblock && \
 RUST_LOG=info ephemeral-validator \
   --accounts-lifecycle ephemeral \
   --remote-cluster development \
