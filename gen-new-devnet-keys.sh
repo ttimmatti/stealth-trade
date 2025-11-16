@@ -1,7 +1,8 @@
 #!/bin/bash
 
 keys=(
-  devnet-mint
+  devnet-mint-a
+  devnet-mint-b
   devnet-group
   devnet-otherGroup
 )
