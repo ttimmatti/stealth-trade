@@ -5,7 +5,6 @@ use crate::{constants::USER_SEED, state::User};
 
 
 #[derive(Accounts)]
-#[instruction(game_id: u64)]
 pub struct CreateUserPermission<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
