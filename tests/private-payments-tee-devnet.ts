@@ -700,7 +700,6 @@ describe("private-dex-tee-devnet", () => {
     const otherUserBefore = await otherUserTeeProgram.account.user.fetch(
       otherUserPda
     );
-    console.log("Other user before", otherUserBefore);
     let otherMintAPositionBefore = otherUserBefore.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
     if (otherMintAPositionBefore === undefined) {
       otherMintAPositionBefore = otherUserBefore.positions[otherUserBefore.positions.length - 1];
@@ -734,7 +733,6 @@ describe("private-dex-tee-devnet", () => {
     const otherUserAfter = await otherUserTeeProgram.account.user.fetch(
       otherUserPda
     );
-    console.log("Other user after", otherUserAfter);
     const otherMintAPositionAfter = otherUserAfter.positions.find(p => p.mint.toBase58() === tokenMintA.toBase58());
     assert.equal(otherMintAPositionAfter.amount.toNumber(), otherMintAPositionBefore.amount.toNumber() + 100_000);
   });
