@@ -3,12 +3,6 @@ use crate::state::{Config, LiquidityPool, LiquidityPoolStatus, User};
 use crate::constants::*;
 use crate::utils::{decrease_position, increase_position};
 use anchor_lang::prelude::*;
-use anchor_spl::{
-    associated_token::AssociatedToken,
-    token_interface::{
-        Mint, TokenInterface,
-    },
-};
 use constant_product_curve::{ConstantProduct, XYAmounts};
 use session_keys::{Session, SessionToken};
 
@@ -40,15 +34,13 @@ pub struct AddLiquidity<'info> {
     )]
     pub config: Account<'info, Config>,
 
-    pub mint_a: InterfaceAccount<'info, Mint>,
-    pub mint_b: InterfaceAccount<'info, Mint>,
+    pub mint_a: UncheckedAccount<'info>,
+    pub mint_b: UncheckedAccount<'info>,
     #[account(
         seeds = [LP_MINT_SEED, lp.key().as_ref()],
         bump = lp.mint_lp_bump,
-        mint::decimals = LP_DECIMALS,
-        mint::authority = config,
     )]
-    pub mint_lp: InterfaceAccount<'info, Mint>,
+    pub mint_lp: UncheckedAccount<'info>,
 
     #[session(
         signer = payer,
@@ -56,8 +48,6 @@ pub struct AddLiquidity<'info> {
     )]
     pub session_token: Option<Account<'info, SessionToken>>,
 
-    pub associated_token_program: Program<'info, AssociatedToken>,
-    pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
 

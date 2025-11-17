@@ -1,5 +1,5 @@
 use crate::errors::ErrorCode;
-use crate::state::{Config, LiquidityPool};
+use crate::state::Config;
 use crate::constants::*;
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::{commit, delegate};

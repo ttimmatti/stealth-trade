@@ -3,10 +3,6 @@ use crate::utils::{decrease_position, increase_position};
 use crate::state::{Config, User};
 use crate::constants::*;
 use anchor_lang::prelude::*;
-use anchor_spl::{
-    associated_token::AssociatedToken,
-    token_interface::{Mint, TokenInterface},
-};
 use session_keys::{Session, SessionToken};
 
 #[derive(Accounts, Session)]
@@ -40,7 +36,8 @@ pub struct Transfer<'info> {
     )]
     pub destination_user_account: Account<'info, User>,
 
-    pub mint: InterfaceAccount<'info, Mint>,
+    /// CHECK: Token Mint to transfer
+    pub mint: UncheckedAccount<'info>,
 
     #[session(
         signer = payer,
@@ -48,8 +45,6 @@ pub struct Transfer<'info> {
     )]
     pub session_token: Option<Account<'info, SessionToken>>,
 
-    pub associated_token_program: Program<'info, AssociatedToken>,
-    pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
 

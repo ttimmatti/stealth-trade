@@ -15,6 +15,9 @@ pub struct UpdateConfig<'info> {
     )]
     pub config: Account<'info, Config>,
 
+    /// CHECK: MagicBlock ER validator
+    pub er_validator: Option<UncheckedAccount<'info>>,
+
     pub system_program: Program<'info, System>,
 }
 
@@ -28,6 +31,10 @@ impl<'info> UpdateConfig<'info> {
 
         if let Some(is_paused) = is_paused {
             self.config.paused = is_paused;
+        }
+
+        if let Some(er_validator) = &self.er_validator {
+            self.config.er_validator = er_validator.to_account_info().key();
         }
 
         if let Some(default_pool_fee_bps) = default_pool_fee_bps {
