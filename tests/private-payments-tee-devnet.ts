@@ -507,13 +507,15 @@ describe("private-dex-tee-devnet", () => {
     let sig = await program.methods
       .addLiquidity(new anchor.BN(500_000), new anchor.BN(500_000), new anchor.BN(500_000))
       .accountsStrict({
-        sender: user,
-        user: userPda,
+        payer: user,
+        user: user,
+        userAccount: userPda,
         config: configPda,
         mintA: tokenMintA,
         mintB: tokenMintB,
         lp: lpPda,
         mintLp: lpMint,
+        sessionToken: null,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
@@ -707,16 +709,18 @@ describe("private-dex-tee-devnet", () => {
     const sig = await ephemeralProgram.methods
       .transfer(new anchor.BN(100_000))
       .accountsStrict({
-        sender: user,
-        user: userPda,
-        destinationUser: otherUserPda,
+        payer: sessionKp.publicKey,
+        user: user,
+        userAccount: userPda,
+        destinationUserAccount: otherUserPda,
         config: configPda,
         mint: tokenMintA,
+        sessionToken: sessionToken,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
-      .signers([userKp])
+      .signers([sessionKp])
       .rpc();
     console.log("Sig transfer", sig);
     await ephemeralProvider.connection.confirmTransaction(sig);
@@ -765,17 +769,20 @@ describe("private-dex-tee-devnet", () => {
     let sig = await ephemeralProgram.methods
       .addLiquidity(new anchor.BN(100_000), new anchor.BN(100_000), new anchor.BN(100_000))
       .accountsStrict({
-        sender: user,
-        user: userPda,
+        payer: sessionKp.publicKey,
+        user: user,
+        userAccount: userPda,
         config: configPda,
         mintA: tokenMintA,
         mintB: tokenMintB,
         lp: lpPda,
         mintLp: lpMint,
+        sessionToken: sessionToken,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
+      .signers([sessionKp])
       .rpc();
     await ephemeralProvider.connection.confirmTransaction(sig);
     console.log("Sig add liquidity in ER", sig);
@@ -812,17 +819,19 @@ describe("private-dex-tee-devnet", () => {
     const sig = await ephemeralProgram.methods
       .swap(true, new anchor.BN(20_000), new anchor.BN(15_000))
       .accountsStrict({
-        sender: user,
-        user: userPda,
+        payer: sessionKp.publicKey,
+        user: user,
+        userAccount: userPda,
         lp: lpPda,
         config: configPda,
         mintA: tokenMintA,
         mintB: tokenMintB,
+        sessionToken: sessionToken,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
-      .signers([userKp])
+      .signers([sessionKp])
       .rpc();
     console.log("Sig swap", sig);
     await ephemeralProvider.connection.confirmTransaction(sig);

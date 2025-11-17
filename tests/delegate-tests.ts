@@ -57,6 +57,10 @@ const otherGroupKp = Keypair.fromSecretKey(
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const LOCALNET_ER_VALIDATOR = new PublicKey(
+  "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev"
+);
+
 describe("Delegate Tests", () => {
   const wallet = new anchor.Wallet(userKp);
 
@@ -100,11 +104,11 @@ describe("Delegate Tests", () => {
     try {
       await program.methods
         .initialize()
-        .accountsPartial({
+        .accountsStrict({
           sender: adminKp.publicKey,
           config: configPda,
           delegateProgram: DELEGATE_PROGRAM_ID,
-          erValidator: ER_VALIDATOR_ID,
+          erValidator: LOCALNET_ER_VALIDATOR,
           permissionProgram: PERMISSION_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
         })
@@ -148,7 +152,7 @@ describe("Delegate Tests", () => {
     try {
       sig = await program.methods
         .createUser()
-        .accountsPartial({
+        .accountsStrict({
           sender: otherUserKp.publicKey,
           user: userPda,
           config: configPda,
@@ -177,7 +181,7 @@ describe("Delegate Tests", () => {
       .accountsPartial({
         payer: otherUserKp.publicKey,
         config: configPda,
-        validator: ER_VALIDATOR_ID,
+        validator: LOCALNET_ER_VALIDATOR,
         userAccount: userPda,
       })
       .signers([otherUserKp])
@@ -211,7 +215,7 @@ describe("Delegate Tests", () => {
     try {
       await program.methods
         .createUser()
-        .accountsPartial({
+        .accountsStrict({
           sender: userKp.publicKey,
           user: userPda,
           config: configPda,
@@ -256,7 +260,7 @@ describe("Delegate Tests", () => {
 
     sig = await program.methods
       .deposit(new anchor.BN(5_000_000))
-      .accountsPartial({
+      .accountsStrict({
         sender: userKp.publicKey,
         user: userPda,
         config: configPda,
@@ -286,7 +290,7 @@ describe("Delegate Tests", () => {
       .accountsPartial({
         payer: userKp.publicKey,
         config: configPda,
-        validator: ER_VALIDATOR_ID,
+        validator: LOCALNET_ER_VALIDATOR,
         userAccount: userPda,
       })
       .signers([userKp])
@@ -346,7 +350,7 @@ describe("Delegate Tests", () => {
 
     sig = await program.methods
       .createLp()
-      .accountsPartial({
+      .accountsStrict({
         sender: creatorKp.publicKey,
         lp: lpPda,
         config: configPda,
@@ -385,7 +389,7 @@ describe("Delegate Tests", () => {
       .accountsPartial({
         payer: creatorKp.publicKey,
         config: configPda,
-        validator: ER_VALIDATOR_ID,
+        validator: LOCALNET_ER_VALIDATOR,
         lpAccount: lpPda,
       })
       .signers([creatorKp])
@@ -483,7 +487,7 @@ describe("Delegate Tests", () => {
       try {
         await program.methods
           .createUser()
-          .accountsPartial({
+          .accountsStrict({
             sender: kp.publicKey,
             user: pda,
             config: configPda,
@@ -553,7 +557,7 @@ describe("Delegate Tests", () => {
 
     await program.methods
       .deposit(new anchor.BN(5_000_000))
-      .accountsPartial({
+      .accountsStrict({
         sender: user1Kp.publicKey,
         user: user1Pda,
         config: configPda,
@@ -569,7 +573,7 @@ describe("Delegate Tests", () => {
 
     await program.methods
       .deposit(new anchor.BN(5_000_000))
-      .accountsPartial({
+      .accountsStrict({
         sender: user1Kp.publicKey,
         user: user1Pda,
         config: configPda,
@@ -595,7 +599,7 @@ describe("Delegate Tests", () => {
 
     await program.methods
       .createLp()
-      .accountsPartial({
+      .accountsStrict({
         sender: user1Kp.publicKey,
         lp: lpPda,
         config: configPda,
@@ -616,14 +620,16 @@ describe("Delegate Tests", () => {
     // Add liquidity
     await program.methods
       .addLiquidity(new anchor.BN(1_000_000), new anchor.BN(3_000_000), new anchor.BN(3_000_000))
-      .accountsPartial({
-        sender: user1Kp.publicKey,
-        user: user1Pda,
+      .accountsStrict({
+        payer: user1Kp.publicKey,
+        user: user1Kp.publicKey,
+        userAccount: user1Pda,
         lp: lpPda,
         config: configPda,
         mintA,
         mintB,
         mintLp: lpMintPda,
+        sessionToken: null,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
@@ -638,7 +644,7 @@ describe("Delegate Tests", () => {
       .accountsPartial({
         payer: user1Kp.publicKey,
         config: configPda,
-        validator: ER_VALIDATOR_ID,
+        validator: LOCALNET_ER_VALIDATOR,
         userAccount: user1Pda,
       })
       .signers([user1Kp])
@@ -662,7 +668,7 @@ describe("Delegate Tests", () => {
       .accountsPartial({
         payer: user2Kp.publicKey,
         config: configPda,
-        validator: ER_VALIDATOR_ID,
+        validator: LOCALNET_ER_VALIDATOR,
         userAccount: user2Pda,
       })
       .signers([user2Kp])
@@ -676,7 +682,7 @@ describe("Delegate Tests", () => {
       .accountsPartial({
         payer: user1Kp.publicKey,
         config: configPda,
-        validator: ER_VALIDATOR_ID,
+        validator: LOCALNET_ER_VALIDATOR,
         lpAccount: lpPda,
       })
       .signers([user1Kp])
