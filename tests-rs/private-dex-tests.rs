@@ -548,9 +548,10 @@ fn test_swap() {
     assert_eq!(lp_data.virtual_reserve_a, 5_000_000);
     assert_eq!(lp_data.virtual_reserve_b, 5_000_000);
     assert_eq!(lp_data.status, LiquidityPoolStatus::Active);
+    println!("LP state before: {:?}", lp_data);
     
     // Try to swap
-    let _ = swap(
+    swap(
         &mut ctx,
         &user,
         user_pda,
@@ -560,7 +561,7 @@ fn test_swap() {
         true,   // swap X for Y
         100_000, // amount
         0,      // min output
-    );
+    ).unwrap();
 
     let lp_data_after = ctx.anchor_ctx.get_account::<LiquidityPool>(&lp).expect("Failed to get liquidity pool account");
     println!("LP state after: {:?}", lp_data_after);
