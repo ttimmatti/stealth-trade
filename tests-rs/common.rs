@@ -120,6 +120,7 @@ pub fn update_config(
     let accounts = private_dex::accounts::UpdateConfig {
         sender: ctx.admin.pubkey(),
         config: ctx.config,
+        er_validator: None,
         system_program: system_program::ID,
     };
     
@@ -343,8 +344,6 @@ pub fn add_liquidity(
         mint_b,
         mint_lp,
         session_token: None,
-        associated_token_program: anchor_spl::associated_token::ID,
-        token_program: anchor_spl::token::ID,
         system_program: system_program::ID,
     };
     
@@ -394,8 +393,6 @@ pub fn remove_liquidity(
         mint_b,
         mint_lp,
         session_token: None,
-        associated_token_program: anchor_spl::associated_token::ID,
-        token_program: anchor_spl::token::ID,
         system_program: system_program::ID,
     };
     
@@ -443,8 +440,6 @@ pub fn swap(
         mint_a,
         mint_b,
         session_token: None,
-        associated_token_program: anchor_spl::associated_token::ID,
-        token_program: anchor_spl::token::ID,
         system_program: system_program::ID,
     };
     
@@ -484,8 +479,6 @@ pub fn transfer(
         destination_user_account: destination_pda,
         mint,
         session_token: None,
-        associated_token_program: anchor_spl::associated_token::ID,
-        token_program: anchor_spl::token::ID,
         system_program: system_program::ID,
     };
     

@@ -1,6 +1,5 @@
 mod common;
 
-use anchor_litesvm::Pubkey;
 use common::*;
 use private_dex::state::{User, LiquidityPool};
 use solana_sdk::signature::{Keypair, Signer};
