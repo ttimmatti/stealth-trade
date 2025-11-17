@@ -36,8 +36,11 @@ pub struct RemoveLiquidity<'info> {
     )]
     pub config: Account<'info, Config>,
 
+    /// CHECK: Liquidity Pool Mint A. Matched against the liquidity pool mint a
     pub mint_a: UncheckedAccount<'info>,
+    /// CHECK: Liquidity Pool Mint B. Matched against the liquidity pool mint b
     pub mint_b: UncheckedAccount<'info>,
+    /// CHECK: Liquidity Pool LP Mint. Matched against the liquidity pool lp mint
     #[account(
         seeds = [LP_MINT_SEED, lp.key().as_ref()],
         bump = lp.mint_lp_bump,

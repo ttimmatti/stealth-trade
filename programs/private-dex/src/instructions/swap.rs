@@ -34,7 +34,9 @@ pub struct Swap<'info> {
     )]
     pub config: Account<'info, Config>,
 
+    /// CHECK: Token Mint to swap. Matched against the liquidity pool mint a
     pub mint_a: UncheckedAccount<'info>,
+    /// CHECK: Token Mint to swap. Matched against the liquidity pool mint b
     pub mint_b: UncheckedAccount<'info>,
 
     #[session(
