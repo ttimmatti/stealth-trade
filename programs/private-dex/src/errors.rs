@@ -30,4 +30,6 @@ pub enum ErrorCode {
     SessionNotAuthenticated,
     #[msg("Session Not Authorized")]
     SessionNotAuthorized,
+    #[msg("User Not Authorized")]
+    UserNotAuthorized,
 }

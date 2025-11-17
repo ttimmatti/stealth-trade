@@ -58,7 +58,6 @@ pub struct UndelegateUser<'info> {
     /// CHECK: Matched against the user account
     /// for non session user is signer to prevent unauthorized account reveal
     /// later can add admin to undelegate for accounts migration
-    #[account(address = payer.key())]
     pub user: UncheckedAccount<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -75,7 +74,7 @@ pub struct UndelegateUser<'info> {
         seeds = [USER_SEED, user.key().as_ref()],
         bump
     )]
-    pub user_account: UncheckedAccount<'info>,
+    pub user_account: Account<'info, User>,
 }
 
 impl<'info> UndelegateUser<'info> {

@@ -10,18 +10,22 @@ use anchor_spl::{
     },
 };
 use constant_product_curve::{ConstantProduct, XYAmounts};
+use session_keys::{Session, SessionToken};
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct AddLiquidity<'info> {
     #[account(mut)]
-    pub sender: Signer<'info>,
+    pub payer: Signer<'info>,
+
+    /// CHECK: Matched against the user account
+    pub user: UncheckedAccount<'info>,
 
     #[account(
         mut,
-        seeds = [USER_SEED, sender.key().as_ref()],
-        bump = user.bump
+        seeds = [USER_SEED, user.key().as_ref()],
+        bump = user_account.bump
     )]
-    pub user: Account<'info, User>,
+    pub user_account: Account<'info, User>,
 
     #[account(
         mut,
@@ -45,6 +49,12 @@ pub struct AddLiquidity<'info> {
         mint::authority = config,
     )]
     pub mint_lp: InterfaceAccount<'info, Mint>,
+
+    #[session(
+        signer = payer,
+        authority = user.key()
+    )]
+    pub session_token: Option<Account<'info, SessionToken>>,
 
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub token_program: Interface<'info, TokenInterface>,
@@ -101,7 +111,7 @@ impl<'info> AddLiquidity<'info> {
             false => self.mint_b.to_account_info(),
         };
 
-        decrease_position(&mut self.user.positions, mint.key(), amount)?;
+        decrease_position(&mut self.user_account.positions, mint.key(), amount)?;
 
         let virtual_reserve = match is_x {
             true => &mut self.lp.virtual_reserve_a,
@@ -114,7 +124,7 @@ impl<'info> AddLiquidity<'info> {
 
     /// Virtual minting of LP tokens to user
     pub fn mint_lp_tokens(&mut self, amount: u64) -> Result<()> {
-        increase_position(&mut self.user.positions, self.mint_lp.key(), amount)?;
+        increase_position(&mut self.user_account.positions, self.mint_lp.key(), amount)?;
 
         self.lp.lp_supply += amount;
         require!(self.lp.lp_supply < LP_SUPPLY, ErrorCode::LiquidityPoolOverflow);

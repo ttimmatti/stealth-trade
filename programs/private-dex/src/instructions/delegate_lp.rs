@@ -5,6 +5,7 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::{commit, delegate};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
+use session_keys::{Session, SessionToken};
 
 #[delegate]
 #[derive(Accounts)]
@@ -50,12 +51,12 @@ impl<'info> DelegateLp<'info> {
 }
 
 #[commit]
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 #[instruction(mint_a: Pubkey, mint_b: Pubkey)]
 pub struct UndelegateLp<'info> {
     #[account(
         mut,
-        address = config.admin  // only admin can undelegate
+        address = config.admin  // only admin can undelegate lp
     )]
     pub payer: Signer<'info>,
 
@@ -65,13 +66,19 @@ pub struct UndelegateLp<'info> {
     )]
     pub config: Account<'info, Config>,
 
+    #[session(
+        signer = payer,
+        authority = payer.key()
+    )]
+    pub session_token: Option<Account<'info, SessionToken>>,
+
     /// CHECK: LP account checked by the delegate program
     #[account(
         mut,
         seeds = [LIQUIDITY_POOL_SEED, mint_a.as_ref(), mint_b.as_ref()],
         bump
     )]
-    pub lp_account: UncheckedAccount<'info>,
+    pub lp_account: Account<'info, LiquidityPool>,
 }
 
 impl<'info> UndelegateLp<'info> {

@@ -7,18 +7,22 @@ use anchor_spl::{
     associated_token::AssociatedToken,
     token_interface::{Mint, TokenInterface},
 };
+use session_keys::{Session, SessionToken};
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct Transfer<'info> {
     #[account(mut)]
-    pub sender: Signer<'info>,
+    pub payer: Signer<'info>,
+
+    /// CHECK: Matched against the user account
+    pub user: UncheckedAccount<'info>,
 
     #[account(
         mut,
-        seeds = [USER_SEED, sender.key().as_ref()],
-        bump = user.bump
+        seeds = [USER_SEED, user.key().as_ref()],
+        bump = user_account.bump
     )]
-    pub user: Account<'info, User>,
+    pub user_account: Account<'info, User>,
 
     #[account(
         seeds = [CONFIG_SEED],
@@ -30,13 +34,19 @@ pub struct Transfer<'info> {
         mut,
         seeds = [
             USER_SEED, 
-            destination_user.authority.as_ref()
+            destination_user_account.authority.as_ref()
         ],
-        bump = destination_user.bump
+        bump = destination_user_account.bump
     )]
-    pub destination_user: Account<'info, User>,
+    pub destination_user_account: Account<'info, User>,
 
     pub mint: InterfaceAccount<'info, Mint>,
+
+    #[session(
+        signer = payer,
+        authority = user.key()
+    )]
+    pub session_token: Option<Account<'info, SessionToken>>,
 
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub token_program: Interface<'info, TokenInterface>,
@@ -47,9 +57,9 @@ impl<'info> Transfer<'info> {
     pub fn transfer(&mut self, amount: u64) -> Result<()> {
         require!(!self.config.paused, ErrorCode::Paused);
 
-        decrease_position(&mut self.user.positions, self.mint.key(), amount)?;
+        decrease_position(&mut self.user_account.positions, self.mint.key(), amount)?;
         
-        increase_position(&mut self.destination_user.positions, self.mint.key(), amount)?;
+        increase_position(&mut self.destination_user_account.positions, self.mint.key(), amount)?;
 
         Ok(())
     }

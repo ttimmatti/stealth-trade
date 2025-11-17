@@ -10,18 +10,22 @@ use anchor_spl::{
     },
 };
 use constant_product_curve::{ConstantProduct, LiquidityPair};
+use session_keys::{Session, SessionToken};
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct Swap<'info> {
     #[account(mut)]
-    pub sender: Signer<'info>,
+    pub payer: Signer<'info>,
+
+    /// CHECK: Matched against the user account
+    pub user: UncheckedAccount<'info>,
 
     #[account(
         mut,
-        seeds = [USER_SEED, sender.key().as_ref()],
-        bump = user.bump
+        seeds = [USER_SEED, user.key().as_ref()],
+        bump = user_account.bump
     )]
-    pub user: Account<'info, User>,
+    pub user_account: Account<'info, User>,
 
     #[account(
         mut,
@@ -38,6 +42,12 @@ pub struct Swap<'info> {
 
     pub mint_a: InterfaceAccount<'info, Mint>,
     pub mint_b: InterfaceAccount<'info, Mint>,
+
+    #[session(
+        signer = payer,
+        authority = user.key()
+    )]
+    pub session_token: Option<Account<'info, SessionToken>>,
 
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub token_program: Interface<'info, TokenInterface>,
@@ -87,7 +97,7 @@ impl<'info> Swap<'info> {
             false => self.mint_b.to_account_info(),
         };
 
-        decrease_position(&mut self.user.positions, mint.key(), amount)?;
+        decrease_position(&mut self.user_account.positions, mint.key(), amount)?;
 
         let virtual_reserve = match is_x {
             true => &mut self.lp.virtual_reserve_a,
@@ -105,7 +115,7 @@ impl<'info> Swap<'info> {
             false => self.mint_b.to_account_info(),
         };
 
-        increase_position(&mut self.user.positions, mint.key(), amount)?;
+        increase_position(&mut self.user_account.positions, mint.key(), amount)?;
 
         let virtual_reserve = match is_x {
             true => &mut self.lp.virtual_reserve_a,

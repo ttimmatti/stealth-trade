@@ -7,6 +7,7 @@ pub mod state;
 pub mod utils;
 pub mod constants;
 
+use errors::ErrorCode;
 use instructions::*;
 
 declare_id!("rkzCttu6jXQ5hnLcZAkZVGsvyWd4TKKxVuTmbxqwvgt");
@@ -14,6 +15,8 @@ declare_id!("rkzCttu6jXQ5hnLcZAkZVGsvyWd4TKKxVuTmbxqwvgt");
 #[ephemeral]
 #[program]
 pub mod private_dex {
+    use session_keys::{Session, session_auth_or, SessionError};
+
     use super::*;
 
     /// Initializes the config account with admin
@@ -51,21 +54,37 @@ pub mod private_dex {
     }
 
     /// Adds virtual liquidity to a liquidity pool
+    #[session_auth_or(
+        ctx.accounts.user.key() == ctx.accounts.user_account.authority.key(),
+        ErrorCode::UserNotAuthorized
+    )]
     pub fn add_liquidity(ctx: Context<AddLiquidity>, amount: u64, max_x: u64, max_y: u64) -> Result<()> {
         ctx.accounts.add_liquidity(amount, max_x, max_y)
     }
 
     /// Removes virtual liquidity from a liquidity pool
+    #[session_auth_or(
+        ctx.accounts.user.key() == ctx.accounts.user_account.authority.key(),
+        ErrorCode::UserNotAuthorized
+    )]
     pub fn remove_liquidity(ctx: Context<RemoveLiquidity>, amount: u64, min_x: u64, min_y: u64) -> Result<()> {
         ctx.accounts.remove_liquidity(amount, min_x, min_y)
     }
 
     /// Transfers virtual tokens from one user to another
+    #[session_auth_or(
+        ctx.accounts.user.key() == ctx.accounts.user_account.authority.key(),
+        ErrorCode::UserNotAuthorized
+    )]
     pub fn transfer(ctx: Context<Transfer>, amount: u64) -> Result<()> {
         ctx.accounts.transfer(amount)
     }
 
     /// Swaps virtual tokens in lp
+    #[session_auth_or(
+        ctx.accounts.user.key() == ctx.accounts.user_account.authority.key(),
+        ErrorCode::UserNotAuthorized
+    )]
     pub fn swap(ctx: Context<Swap>, is_x: bool, amount: u64, min: u64) -> Result<()> {
         ctx.accounts.swap(is_x, amount, min)
     }
@@ -91,6 +110,10 @@ pub mod private_dex {
     }
 
     /// Commits and undelegates a user account from the ephemeral rollups program
+    #[session_auth_or(
+        ctx.accounts.user.key() == ctx.accounts.user_account.authority.key(),
+        ErrorCode::UserNotAuthorized
+    )]
     pub fn commit_and_undelegate_user(ctx: Context<UndelegateUser>) -> Result<()> {
         ctx.accounts.commit_and_undelegate()
     }
@@ -101,6 +124,10 @@ pub mod private_dex {
     }
 
     /// Commits and undelegates a liquidity pool account from the ephemeral rollups program
+    #[session_auth_or(
+        ctx.accounts.payer.key() == ctx.accounts.config.admin.key(),
+        ErrorCode::Unauthorized
+    )]
     pub fn commit_and_undelegate_lp(ctx: Context<UndelegateLp>, mint_a: Pubkey, mint_b: Pubkey) -> Result<()> {
         ctx.accounts.commit_and_undelegate(mint_a, mint_b)
     }

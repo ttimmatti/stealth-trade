@@ -12,18 +12,22 @@ use anchor_spl::{
     },
 };
 use constant_product_curve::{ConstantProduct, XYAmounts};
+use session_keys::{Session, SessionToken};
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct RemoveLiquidity<'info> {
     #[account(mut)]
-    pub sender: Signer<'info>,
+    pub payer: Signer<'info>,
+
+    /// CHECK: Matched against the user account
+    pub user: UncheckedAccount<'info>,
 
     #[account(
         mut,
-        seeds = [USER_SEED, sender.key().as_ref()],
-        bump = user.bump
+        seeds = [USER_SEED, user.key().as_ref()],
+        bump = user_account.bump
     )]
-    pub user: Account<'info, User>,
+    pub user_account: Account<'info, User>,
 
     #[account(
         mut,
@@ -48,6 +52,12 @@ pub struct RemoveLiquidity<'info> {
         mint::authority = config,
     )]
     pub mint_lp: InterfaceAccount<'info, Mint>,
+
+    #[session(
+        signer = payer,
+        authority = user.key()
+    )]
+    pub session_token: Option<Account<'info, SessionToken>>,
 
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub token_program: Interface<'info, TokenInterface>,
@@ -95,7 +105,7 @@ impl<'info> RemoveLiquidity<'info> {
             false => self.mint_b.to_account_info(),
         };
 
-        increase_position(&mut self.user.positions, mint.key(), amount)?;
+        increase_position(&mut self.user_account.positions, mint.key(), amount)?;
 
         let virtual_reserve = match is_x {
             true => &mut self.lp.virtual_reserve_a,
@@ -109,7 +119,7 @@ impl<'info> RemoveLiquidity<'info> {
 
     /// Virtual burning of LP tokens from user
     pub fn burn_lp_tokens(&mut self, amount: u64) -> Result<()> {
-        decrease_position(&mut self.user.positions, self.mint_lp.key(), amount)?;
+        decrease_position(&mut self.user_account.positions, self.mint_lp.key(), amount)?;
 
         require!(self.lp.lp_supply >= amount, ErrorCode::InsufficientPoolBalance);
         self.lp.lp_supply -= amount;
