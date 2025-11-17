@@ -583,7 +583,7 @@ describe("private-dex-tee-devnet", () => {
       sessionManager.program.programId
     )[0];
     const sig = await sessionManager.program.methods
-      .createSession(true, null, null)
+      .createSession(false, null, null)
       .accountsPartial({
         sessionToken,
         sessionSigner: sessionKp.publicKey,
@@ -611,7 +611,7 @@ describe("private-dex-tee-devnet", () => {
       sessionManager.program.programId
     )[0];
     const otherSessionSig = await sessionManager.program.methods
-      .createSession(true, null, null)
+      .createSession(false, null, null)
       .accountsPartial({
         sessionToken: otherSessionToken,
         sessionSigner: otherSessionKp.publicKey,
