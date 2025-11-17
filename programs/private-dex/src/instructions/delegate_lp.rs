@@ -78,7 +78,7 @@ pub struct UndelegateLp<'info> {
         seeds = [LIQUIDITY_POOL_SEED, mint_a.as_ref(), mint_b.as_ref()],
         bump
     )]
-    pub lp_account: Account<'info, LiquidityPool>,
+    pub lp_account: UncheckedAccount<'info>,
 }
 
 impl<'info> UndelegateLp<'info> {
