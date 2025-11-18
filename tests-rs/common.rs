@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use anchor_litesvm::{AnchorContext, AnchorLiteSVM};
 use private_dex::{instruction, state::LiquidityPool};
 use anchor_lang::{InstructionData, ToAccountMetas, system_program};
@@ -620,7 +622,7 @@ pub fn get_group_pda(group_id: Pubkey, permission_program_id: &Pubkey) -> Pubkey
 }
 
 /// Derives the Permission PDA for a given delegated account and group
-pub fn get_permission_pda(delegated_account: Pubkey, group: Pubkey, permission_program_id: &Pubkey) -> Pubkey {
+pub fn get_permission_pda(delegated_account: Pubkey, permission_program_id: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
         &[b"permission:", delegated_account.as_ref()],
         permission_program_id

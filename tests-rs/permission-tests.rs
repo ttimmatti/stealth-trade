@@ -27,7 +27,7 @@ fn create_user_permission(
 ) -> Result<(Pubkey, Pubkey), Box<dyn std::error::Error>> {
     // Use utility functions for PDA derivation
     let group = get_group_pda(group_id, &PERMISSION_PROGRAM_ID);
-    let permission = get_permission_pda(user_pda, group, &PERMISSION_PROGRAM_ID);
+    let permission = get_permission_pda(user_pda, &PERMISSION_PROGRAM_ID);
     
     let accounts = private_dex::accounts::CreateUserPermission {
         payer: payer.pubkey(),
@@ -110,7 +110,7 @@ fn create_lp_permission(
     group: Pubkey,
 ) -> Result<Pubkey, Box<dyn std::error::Error>> {
     // Use utility function for PDA derivation
-    let permission = get_permission_pda(lp, group, &PERMISSION_PROGRAM_ID);
+    let permission = get_permission_pda(lp, &PERMISSION_PROGRAM_ID);
     
     let accounts = private_dex::accounts::CreateLpPermission {
         sender: sender.pubkey(),
