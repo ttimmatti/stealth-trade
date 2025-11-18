@@ -1,6 +1,8 @@
 #!/bin/bash
 
 keys=(
+  devnet-user
+  devnet-otherUser
   devnet-mint-a
   devnet-mint-b
   devnet-group
