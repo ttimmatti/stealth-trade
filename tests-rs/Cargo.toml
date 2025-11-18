@@ -20,7 +20,7 @@ name = "delegate-tests"
 path = "delegate-tests.rs"
 
 [dependencies]
-private_dex = { path = "../programs/private-dex", features = ["no-entrypoint"] }
+stealth_trade = { path = "../programs/stealth-trade", features = ["no-entrypoint"] }
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
 solana-program = { workspace = true }

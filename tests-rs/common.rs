@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use anchor_litesvm::{AnchorContext, AnchorLiteSVM};
-use private_dex::{instruction, state::LiquidityPool};
+use stealth_trade::{instruction, state::LiquidityPool};
 use anchor_lang::{InstructionData, ToAccountMetas, system_program};
 use solana_sdk::{
     instruction::Instruction, 
@@ -46,9 +46,9 @@ pub struct TestContext {
 
 impl TestContext {
     pub fn new() -> Self {        
-        let program_keypair = read_keypair_file("../target/deploy/private_dex-keypair.json").unwrap();
+        let program_keypair = read_keypair_file("../target/deploy/stealth_trade-keypair.json").unwrap();
         let program_id = program_keypair.pubkey();
-        let program_bytes = include_bytes!("../target/deploy/private_dex.so");
+        let program_bytes = include_bytes!("../target/deploy/stealth_trade.so");
 
         let mut ctx = AnchorLiteSVM::build_with_program(program_id, program_bytes);
 
@@ -85,7 +85,7 @@ impl TestContext {
 
 /// Helper: Initialize the config
 pub fn initialize_config(ctx: &mut TestContext) -> Result<(), Box<dyn std::error::Error>> {
-    let accounts = private_dex::accounts::Initialize {
+    let accounts = stealth_trade::accounts::Initialize {
         sender: ctx.admin.pubkey(),
         config: ctx.config,
         delegate_program: DELEGATE_PROGRAM_ID,
@@ -119,7 +119,7 @@ pub fn update_config(
     is_paused: Option<bool>,
     default_pool_fee_bps: Option<u16>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let accounts = private_dex::accounts::UpdateConfig {
+    let accounts = stealth_trade::accounts::UpdateConfig {
         sender: ctx.admin.pubkey(),
         config: ctx.config,
         er_validator: None,
@@ -158,7 +158,7 @@ pub fn create_user(
         &ctx.program_id,
     );
     
-    let accounts = private_dex::accounts::CreateUser {
+    let accounts = stealth_trade::accounts::CreateUser {
         sender: user_keypair.pubkey(),
         user: user_pda,
         config: ctx.config,
@@ -195,7 +195,7 @@ pub fn deposit(
     let sender_ata = get_associated_token_address(&user_keypair.pubkey(), &mint);
     let vault = get_associated_token_address(&ctx.config, &mint);
     
-    let accounts = private_dex::accounts::Deposit {
+    let accounts = stealth_trade::accounts::Deposit {
         sender: user_keypair.pubkey(),
         user: user_pda,
         config: ctx.config,
@@ -237,7 +237,7 @@ pub fn withdraw(
     let sender_ata = get_associated_token_address(&user_keypair.pubkey(), &mint);
     let vault = get_associated_token_address(&ctx.config, &mint);
     
-    let accounts = private_dex::accounts::Withdraw {
+    let accounts = stealth_trade::accounts::Withdraw {
         sender: user_keypair.pubkey(),
         user: user_pda,
         config: ctx.config,
@@ -289,7 +289,7 @@ pub fn create_lp(
     let vault_b = get_associated_token_address(&ctx.config, &mint_b);
     let vault_lp = get_associated_token_address(&ctx.config, &mint_lp);
     
-    let accounts = private_dex::accounts::CreateLp {
+    let accounts = stealth_trade::accounts::CreateLp {
         sender: creator.pubkey(),
         lp,
         config: ctx.config,
@@ -336,7 +336,7 @@ pub fn add_liquidity(
     max_x: u64,
     max_y: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let accounts = private_dex::accounts::AddLiquidity {
+    let accounts = stealth_trade::accounts::AddLiquidity {
         payer: user_keypair.pubkey(),
         user: user_keypair.pubkey(),
         user_account: user_pda,
@@ -385,7 +385,7 @@ pub fn remove_liquidity(
     min_x: u64,
     min_y: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let accounts = private_dex::accounts::RemoveLiquidity {
+    let accounts = stealth_trade::accounts::RemoveLiquidity {
         payer: user_keypair.pubkey(),
         user: user_keypair.pubkey(),
         user_account: user_pda,
@@ -433,7 +433,7 @@ pub fn swap(
     amount: u64,
     min: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let accounts = private_dex::accounts::Swap {
+    let accounts = stealth_trade::accounts::Swap {
         payer: user_keypair.pubkey(),
         user: user_keypair.pubkey(),
         user_account: user_pda,
@@ -473,7 +473,7 @@ pub fn transfer(
     mint: Pubkey,
     amount: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let accounts = private_dex::accounts::Transfer {
+    let accounts = stealth_trade::accounts::Transfer {
         payer: sender_keypair.pubkey(),
         user: sender_keypair.pubkey(),
         user_account: sender_pda,
@@ -535,7 +535,7 @@ pub fn delegate_user(
     let data = instruction::DelegateUser { user };
     
     // Manually construct account metas for the delegate instruction
-    let accounts = private_dex::accounts::DelegateUser {
+    let accounts = stealth_trade::accounts::DelegateUser {
         payer: payer.pubkey(),
         config: ctx.config,
         validator: ER_VALIDATOR_ID,
@@ -579,7 +579,7 @@ pub fn delegate_lp(
     };
     
     // Manually construct account metas for the delegate instruction
-    let accounts = private_dex::accounts::DelegateLp {
+    let accounts = stealth_trade::accounts::DelegateLp {
         payer: payer.pubkey(),
         config: ctx.config,
         validator: ER_VALIDATOR_ID,

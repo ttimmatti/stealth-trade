@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use anchor_spl::token_interface::TokenAccount;
-use private_dex::{constants::MAX_POSITIONS, state::{Config, LiquidityPool, LiquidityPoolStatus, User}};
+use stealth_trade::{constants::MAX_POSITIONS, state::{Config, LiquidityPool, LiquidityPoolStatus, User}};
 use solana_sdk::{pubkey::Pubkey, signature::{Keypair, Signer}};
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use spl_associated_token_account::get_associated_token_address;

@@ -10,7 +10,7 @@ pub mod constants;
 use errors::ErrorCode;
 use instructions::*;
 
-declare_id!("FZyeL34kjYaQ2VrUZWezX47U3WBsaV11RQRz5iMje1r6");
+declare_id!("8Wd23yHNd1NADPh9781rEzv65wkjyevZGDSibw4ExGLF");
 
 #[ephemeral]
 #[program]

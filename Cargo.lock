@@ -2351,23 +2351,11 @@ dependencies = [
  "borsh 1.5.7",
  "litesvm",
  "litesvm-token",
- "private_dex",
  "solana-program",
  "solana-sdk",
  "spl-associated-token-account 7.0.0",
  "spl-token 7.0.0",
-]
-
-[[package]]
-name = "private_dex"
-version = "0.1.0"
-dependencies = [
- "anchor-lang",
- "anchor-spl",
- "constant-product-curve",
- "ephemeral-rollups-sdk",
- "magicblock-permission-client",
- "session-keys",
+ "stealth_trade",
 ]
 
 [[package]]
@@ -5574,6 +5562,18 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "stealth_trade"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "constant-product-curve",
+ "ephemeral-rollups-sdk",
+ "magicblock-permission-client",
+ "session-keys",
+]
 
 [[package]]
 name = "strsim"

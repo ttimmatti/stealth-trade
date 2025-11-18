@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use anchor_lang::{InstructionData, ToAccountMetas, system_program};
-use private_dex::{instruction, state::LiquidityPool};
+use stealth_trade::{instruction, state::LiquidityPool};
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -29,7 +29,7 @@ fn create_user_permission(
     let group = get_group_pda(group_id, &PERMISSION_PROGRAM_ID);
     let permission = get_permission_pda(user_pda, &PERMISSION_PROGRAM_ID);
     
-    let accounts = private_dex::accounts::CreateUserPermission {
+    let accounts = stealth_trade::accounts::CreateUserPermission {
         payer: payer.pubkey(),
         user: user_keypair.pubkey(),
         user_account: user_pda,
@@ -70,7 +70,7 @@ fn create_lp_permission_group(
     // Use utility function for PDA derivation
     let group = get_group_pda(group_id, &PERMISSION_PROGRAM_ID);
     
-    let accounts = private_dex::accounts::CreateLpPermissionGroup {
+    let accounts = stealth_trade::accounts::CreateLpPermissionGroup {
         sender: sender.pubkey(),
         group,
         permission_program: PERMISSION_PROGRAM_ID,
@@ -112,7 +112,7 @@ fn create_lp_permission(
     // Use utility function for PDA derivation
     let permission = get_permission_pda(lp, &PERMISSION_PROGRAM_ID);
     
-    let accounts = private_dex::accounts::CreateLpPermission {
+    let accounts = stealth_trade::accounts::CreateLpPermission {
         sender: sender.pubkey(),
         lp,
         permission,

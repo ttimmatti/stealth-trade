@@ -1,7 +1,7 @@
 mod common;
 
 use common::*;
-use private_dex::state::{User, LiquidityPool};
+use stealth_trade::state::{User, LiquidityPool};
 use solana_sdk::signature::{Keypair, Signer};
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 
