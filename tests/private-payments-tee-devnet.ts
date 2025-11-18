@@ -15,6 +15,7 @@ import {
   getAssociatedTokenAddressSync,
   mintToChecked,
   TOKEN_PROGRAM_ID,
+// @ts-ignore
 } from "@solana/spl-token";
 import { assert } from "chai";
 import {
@@ -41,7 +42,7 @@ const LOCALNET_ER_VALIDATOR = new PublicKey(
   "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev"
 );
 
-const isLocalnet = true;
+const isLocalnet = false;
 const erValidator = isLocalnet ? LOCALNET_ER_VALIDATOR : TEE_DEVNET_VALIDATOR;
 
 // static keys for users for easier debuggin
@@ -357,6 +358,21 @@ describe("private-dex-tee-devnet", () => {
     }
   });
 
+  it("Update config", async () => {
+    let sig = await program.methods
+      .updateConfig(false, null)
+      .accountsStrict({
+        sender: adminKp.publicKey,
+        config: configPda,
+        erValidator: isLocalnet ? LOCALNET_ER_VALIDATOR : TEE_DEVNET_VALIDATOR,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([adminKp])
+      .rpc();
+      await provider.connection.confirmTransaction(sig);
+      console.log("Sig initialize config", sig);
+  });
+
   it("Initialize users", async () => {
     if ((await provider.connection.getAccountInfo(userPda)) !== null) {
       console.log("Users already initialized");
@@ -474,7 +490,7 @@ describe("private-dex-tee-devnet", () => {
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
-      .rpc({ skipPreflight: true });
+      .rpc();
     await provider.connection.confirmTransaction(sig);
     console.log("Sig create LP", sig);
 
@@ -516,8 +532,6 @@ describe("private-dex-tee-devnet", () => {
         lp: lpPda,
         mintLp: lpMint,
         sessionToken: null,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
@@ -672,23 +686,7 @@ describe("private-dex-tee-devnet", () => {
   });
 
   // private transfer
-  // TODO: add session token
   it("Transfer", async () => {
-    // Used to force fetching accounts from the base validator for localnet
-    try {
-      await ephemeralProvider.connection.requestAirdrop(userPda, 1000);
-    } catch (error) {
-      console.error(error);
-      // fails to airdrop but loads the accounts into the er
-      // console.log("Error airdropping deposit PDA", error);
-    }
-    try {
-      await ephemeralProvider.connection.requestAirdrop(otherUserPda, 1000);
-    } catch (error) {
-      // fails to airdrop but loads the accounts into the er
-      // console.log("Error airdropping other deposit PDA", error);
-    }
-
     const userBefore = await userTeeProgram.account.user.fetch(
       userPda
     );
@@ -715,8 +713,6 @@ describe("private-dex-tee-devnet", () => {
         config: configPda,
         mint: tokenMintA,
         sessionToken: sessionToken,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
       .signers([sessionKp])
@@ -738,7 +734,6 @@ describe("private-dex-tee-devnet", () => {
   });
 
   // add liquidity in ER
-  // TODO: add session token
   it("Add Liquidity in ER", async () => {
     // Used to force fetching accounts from the base validator for localnet
     try {
@@ -776,8 +771,6 @@ describe("private-dex-tee-devnet", () => {
         lp: lpPda,
         mintLp: lpMint,
         sessionToken: sessionToken,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
       .signers([sessionKp])
@@ -800,7 +793,6 @@ describe("private-dex-tee-devnet", () => {
   });
 
   // private swap
-  // TODO: add session token
   it("Swap", async () => {
     const userBefore = await userTeeProgram.account.user.fetch(
       userPda
@@ -825,8 +817,6 @@ describe("private-dex-tee-devnet", () => {
         mintA: tokenMintA,
         mintB: tokenMintB,
         sessionToken: sessionToken,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
       .signers([sessionKp])
@@ -864,12 +854,12 @@ describe("private-dex-tee-devnet", () => {
       const sig = await ephemeralProgram.methods
         .commitAndUndelegateUser()
         .accountsPartial({
-          payer: kp.publicKey,
+          payer: sessionKey.publicKey,
           user: kp.publicKey,
-          sessionToken: null,
+          sessionToken: session,
           userAccount,
         })
-        .signers([kp])
+        .signers([sessionKey])
         .rpc();
       console.log("Sig undelegate", sig);
       await ephemeralProvider.connection.confirmTransaction(sig, "finalized");
@@ -953,7 +943,7 @@ async function getPrivateRollupProvider(wallet: anchor.Wallet) {
   const token = await getAuthToken(DEVNET_EPHEMERAL_TEE_URL, wallet.payer);
   return new anchor.AnchorProvider(
     new anchor.web3.Connection(`${DEVNET_EPHEMERAL_TEE_URL}?token=${token}`, {
-    // new anchor.web3.Connection("https://devnet.magicblock.app", {
+    // new anchor.web3.Connection("https://devnet-as.magicblock.app", {
       commitment: "confirmed",
     }),
     wallet
