@@ -1,19 +1,7 @@
 # Stealth Trade – Private DEX on Private Ephemeral Rollups (PER)
 
-A Solana Fast Private Trading Platform that works on Solana with Private Ephemeral Rollup (PER).
+A Fast Private Trading Platform that works on Solana with Private Ephemeral Rollup (PER).
 
-## Summary
-
-- [Private Payments](#private-payments)
-  - [Summary](#summary)
-  - [How it works](#how-it-works)
-    - [Private Ephemeral Rollup](#private-ephemeral-rollup)
-    - [How do private transfers work on PER?](#how-do-private-transfers-work-on-PER?)
-  - [Running the demo](#running-the-demo)
-    - [Installation](#installation)
-    - [Run the app](#run-the-app)
-    - [Usage guide](#usage-guide)
-    - [Test the program](#test-the-program)
 
 ## How it works
 
